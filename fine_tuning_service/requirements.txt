@@ -1,0 +1,4 @@
+torch
+fastapi
+uvicorn[standard]
+# Add any other dependencies needed for actual fine-tuning (torch, etc.)

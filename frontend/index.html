@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Neural Style Transfer</title>
+    <link rel="stylesheet" href="static/css/style.css" />
+  </head>
+  <body>
+    <div class="container">
+      <h1>Neural Style Transfer</h1>
+
+      <form id="nst-form">
+        <div class="form-group">
+          <label for="model">Select Model:</label>
+          <select id="model" name="model">
+            <option value="model1">Model 1</option>
+            <option value="model2">Model 2</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="content-image">Content Image:</label>
+          <input
+            type="file"
+            id="content-image"
+            name="content_image"
+            accept="image/*"
+            required
+          />
+          <!-- Image preview area -->
+          <img
+            id="content-preview"
+            src="#"
+            alt="Content Image Preview"
+            style="display: none"
+          />
+        </div>
+
+        <button type="submit" class="button">Stylize</button>
+      </form>
+
+      <div id="result-section" style="display: none">
+        <h2>Stylized Image</h2>
+        <img id="stylized-image" src="" alt="Stylized Output" />
+        <br />
+        <a
+          id="download-link"
+          href="#"
+          download="stylized.png"
+          class="button download-button"
+          >Download</a
+        >
+        <br /><br />
+        <form id="feedback-form">
+          <div class="form-group">
+            <label for="feedback">Feedback:</label>
+            <select id="feedback" name="feedback">
+              <option value="good">Good</option>
+              <option value="bad">Bad</option>
+            </select>
+          </div>
+          <button type="submit" class="button feedback-button">
+            Submit Feedback
+          </button>
+        </form>
+      </div>
+    </div>
+    <!-- /container -->
+
+    <script src="static/js/script.js"></script>
+    <!-- Moved script tag to end of body -->
+  </body>
+</html>

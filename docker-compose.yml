@@ -1,0 +1,42 @@
+version: '3.8'
+services:
+  frontend:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html
+
+  routing_service:
+    build: ./routing_service
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./persistent_storage:/persistent_storage
+      - ./database:/database
+    depends_on:
+      - inference_service_model1
+      - inference_service_model2
+
+  inference_service_model1:
+    build: ./inference_service_model1
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./persistent_storage:/persistent_storage
+      - /tmp
+
+  inference_service_model2:
+    build: ./inference_service_model2
+    ports:
+      - "8002:8000"
+    volumes:
+      - ./persistent_storage:/persistent_storage
+      - /tmp
+
+  fine_tuning_service:
+    build: ./fine_tuning_service
+    ports:
+      - "8003:8000"
+    volumes:
+      - ./persistent_storage:/persistent_storage
