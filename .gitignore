@@ -1,0 +1,43 @@
+# Ignore Python cache and compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore virtual environments
+venv/
+env/
+.venv/
+.env/
+
+# Ignore system files
+.DS_Store
+Thumbs.db
+
+# Ignore persistent storage and nst folders
+persistent_storage/
+nst/
+
+# Ignore database and temporary files
+database/
+*.sqlite3
+*.db
+
+# Ignore logs
+*.log
+
+# Ignore Docker build artifacts
+**/tmp/
+*.pid
+
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Ignore VSCode and PyCharm settings
+.vscode/
+.idea/
+
+# Ignore frontend build artifacts (if any)
+frontend/node_modules/
+frontend/dist/
+frontend/build/

@@ -22,8 +22,8 @@ app.add_middleware(
     allow_headers=["*"],  # Allows all headers
 )
 
-# Adjust path assuming script is run from routing_service/ directory
-PERSISTENT_STORAGE = "../persistent_storage"
+# Adjust path assuming script is run from routing_service/app directory
+PERSISTENT_STORAGE = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../persistent_storage"))
 INPUT_IMAGES = os.path.join(PERSISTENT_STORAGE, "input_images")
 OUTPUT_IMAGES = os.path.join(PERSISTENT_STORAGE, "output_images")
 MODELS_DIR = os.path.join(PERSISTENT_STORAGE, "models")
@@ -33,19 +33,35 @@ os.makedirs(INPUT_IMAGES, exist_ok=True)
 os.makedirs(OUTPUT_IMAGES, exist_ok=True)
 os.makedirs(MODELS_DIR, exist_ok=True)
 
-def get_latest_model_path(model_name):
+# Configuration for inference services
+# These URLs now use the service names as hostnames and the internal container port (8000)
+# INFERENCE_SERVICE_URLS = {
+#     "model1": "http://inference_service_model1:8000/infer",
+#     "model2": "http://inference_service_model2:8000/infer",
+#     "model3": "http://inference_service_model3:8000/infer",
+#     "model4": "http://inference_service_model4:8000/infer",
+#     # Add other models and their inference service URLs here
+# }
+
+def get_latest_model_path(model_name: str):
     model_dir = os.path.join(MODELS_DIR, model_name)
     latest_path = os.path.join(model_dir, "latest.txt")
     if os.path.exists(latest_path):
         with open(latest_path, "r") as f:
             latest_model_file = f.read().strip()
-        return os.path.join(model_dir, latest_model_file)
-    else:
-        # Fallback to v1 if no latest.txt
-        fallback = os.path.join(model_dir, f"{model_name}_v1.pth")
-        if os.path.exists(fallback):
-            return fallback
-        return None
+        ckpt_prefix = os.path.join(model_dir, latest_model_file)
+        ckpt_index = ckpt_prefix + ".index"
+        ckpt_data = ckpt_prefix + ".data-00000-of-00001"
+        ckpt_meta = ckpt_prefix + ".meta"
+        
+        if all(os.path.exists(p) for p in [ckpt_index, ckpt_data, ckpt_meta]):
+            return ckpt_prefix
+        if os.path.exists(ckpt_prefix) and ckpt_prefix.endswith(".pth"):
+            return ckpt_prefix
+        ckpt_file = ckpt_prefix + ".ckpt"
+        if os.path.exists(ckpt_file):
+            return ckpt_file
+    return None
 
 @app.get("/")
 def read_root():
@@ -65,11 +81,6 @@ async def stylize(
     # Get the latest model file path
     model_path_local_check = get_latest_model_path(model)
 
-    # Basic check if model file exists before calling inference
-    if not model_path_local_check or not os.path.exists(model_path_local_check):
-        logging.error(f"Model file not found at {model_path_local_check}")
-        raise HTTPException(status_code=404, detail=f"Model file not found at {model_path_local_check}")
-
     # Send the actual model file path to the inference service
     model_path_in_inference = model_path_local_check
 
@@ -80,6 +91,12 @@ async def stylize(
     elif model == "model2":
         # Assuming model2 runs on port 8002 locally
         url = "http://localhost:8002/infer"
+    elif model == "model3":
+        # Assuming model3 runs on port 8003 locally
+        url = "http://localhost:8003/infer"
+    elif model == "model4":
+        # Assuming model3 runs on port 8003 locally
+        url = "http://localhost:8004/infer"
     else:
         logging.error(f"Invalid model specified: {model}")
         raise HTTPException(status_code=400, detail="Invalid model specified")

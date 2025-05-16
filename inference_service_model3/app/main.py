@@ -12,11 +12,11 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from model2_inference import generate
+from model3_inference import generate
 
 @app.get("/")
 def read_root():
-    return {"message": "Inference Service Model 2"}
+    return {"message": "Inference Service Model 3"}
 
 def cleanup_files(files: list):
     for file_path in files:
@@ -24,7 +24,7 @@ def cleanup_files(files: list):
             os.remove(file_path)
 
 def resolve_model_path(model_path: str):
-    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../persistent_storage/models/model2"))
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../persistent_storage/models/model3"))
     if not model_path or not os.path.isabs(model_path):
         model_dir = base_dir
     else:
@@ -43,10 +43,10 @@ def resolve_model_path(model_path: str):
             pth_file = os.path.join(model_dir, latest_model_file)
             if os.path.exists(pth_file):
                 return pth_file
-            fallback_ckpt = os.path.join(model_dir, "model2_v1.ckpt")
+            fallback_ckpt = os.path.join(model_dir, "model3_v1.ckpt")
             if all(os.path.exists(fallback_ckpt + ext) for ext in [".index", ".meta", ".data-00000-of-00001"]):
                 return fallback_ckpt
-            fallback_pth = os.path.join(model_dir, "model2_v1.pth")
+            fallback_pth = os.path.join(model_dir, "model3_v1.pth")
             if os.path.exists(fallback_pth):
                 return fallback_pth
             raise FileNotFoundError(f"No valid model checkpoint (.ckpt) or .pth file found in {model_dir}")
@@ -73,7 +73,7 @@ async def infer(
             shutil.copyfileobj(content_image.file, f)
 
         resolved_model_path = resolve_model_path("")
-        logger.info(f"Resolved model2 checkpoint path: {resolved_model_path}")
+        logger.info(f"Resolved model3 checkpoint path: {resolved_model_path}")
 
         try:
             generate(

@@ -1,5 +1,8 @@
 fastapi
 uvicorn[standard]
 python-multipart
-# Add torch, torchvision, etc. if needed by model1_inference.py
-httpx # Add httpx for making API calls
+numpy
+imageio
+Pillow
+tensorflow # Use CPU version for lighter image. For specific hardware, this might change.
+scipy
