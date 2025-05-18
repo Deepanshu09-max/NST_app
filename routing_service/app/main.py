@@ -70,7 +70,7 @@ def get_latest_model_path(model_name: str):
 def read_root():
     return {"message": "Routing Service"}
 
-@app.post("/stylize")  # Ensure this matches the rewritten path
+@app.post("/stylize")
 async def stylize(
     model: str = Form(...),
     content_image: UploadFile = File(...)
@@ -87,8 +87,10 @@ async def stylize(
         model_path_local_check = get_latest_model_path(model)
         logging.info(f"Resolved model path: {model_path_local_check}")
 
-        # Send the actual model file path to the inference service
-        model_path_in_inference = model_path_local_check
+        # Adjust the model path to match the inference service's expectations
+        model_path_in_inference = model_path_local_check.replace(
+            "/persistent_storage/models", "/persistent_storage/models"
+        )
         logging.info(f"Model path sent to inference service: {model_path_in_inference}")
 
         # Route to inference service - Use service names for Docker/K8s compatibility

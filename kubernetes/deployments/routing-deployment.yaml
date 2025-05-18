@@ -14,13 +14,12 @@ spec:
     spec:
       containers:
         - name: routing-service
-          image: routing_service:latest
-          imagePullPolicy: IfNotPresent
+          image: deepanshu0903/nst_app:routing_service
           ports:
             - containerPort: 8000
           volumeMounts:
             - name: model-storage
-              mountPath: /persistent_storage # Updated mount path
+              mountPath: /persistent_storage
       volumes:
         - name: model-storage
           persistentVolumeClaim:

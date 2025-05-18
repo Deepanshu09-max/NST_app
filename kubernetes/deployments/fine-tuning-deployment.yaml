@@ -14,13 +14,12 @@ spec:
     spec:
       containers:
         - name: fine-tuning-service
-          image: fine_tuning_service:latest
-          imagePullPolicy: IfNotPresent
+          image: deepanshu0903/nst_app:fine_tuning_service
           ports:
             - containerPort: 8000
           volumeMounts:
             - name: model-storage
-              mountPath: /persistent_storage # Updated for consistency
+              mountPath: /persistent_storage # Ensure this matches the PVC
       volumes:
         - name: model-storage
           persistentVolumeClaim:

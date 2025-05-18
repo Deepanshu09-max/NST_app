@@ -8,6 +8,7 @@ spec:
     storage: 2Gi
   accessModes:
     - ReadWriteMany
-  hostPath:
-    path: "/persistent_storage" # Ensure this matches the Minikube mount path
   persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /persistent_storage # Specify the directory on the Minikube VM
+    type: DirectoryOrCreate
