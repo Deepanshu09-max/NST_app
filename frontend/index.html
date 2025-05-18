@@ -4,13 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Neural Style Transfer</title>
-    <link rel="stylesheet" href="static/css/style.css" />
+    <link rel="stylesheet" href="/static/css/style.css" />
   </head>
   <body>
     <div class="container">
       <h1>Neural Style Transfer</h1>
 
-      <form id="nst-form">
+      <form id="nst-form" method="POST" enctype="multipart/form-data">
         <div class="form-group">
           <label for="model">Select Model:</label>
           <select id="model" name="model">
@@ -54,7 +54,7 @@
           >Download</a
         >
         <br /><br />
-        <form id="feedback-form">
+        <form id="feedback-form" method="POST" enctype="application/json">
           <div class="form-group">
             <label for="feedback">Feedback:</label>
             <select id="feedback" name="feedback">
@@ -70,7 +70,10 @@
     </div>
     <!-- /container -->
 
-    <script src="static/js/script.js"></script>
-    <!-- Moved script tag to end of body -->
+    <script>
+      console.log('script.js will load now');
+    </script>
+    <script src="/static/js/script.js"></script>
+    <!-- Moved script tags to end of body -->
   </body>
 </html>

@@ -412,3 +412,4 @@ def _handler2(content_path, model_path, save_path=None, prefix=None, suffix=None
     return output
 
 # All code is ready for import and use by main.py
+model_dir = "/persistent_storage/models/model1"

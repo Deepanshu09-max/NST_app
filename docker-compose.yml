@@ -1,6 +1,6 @@
 version: '3.8'
 
-networks: # Define a common network
+networks:
   app_network:
     driver: bridge
 
@@ -8,96 +8,77 @@ services:
   frontend:
     build: ./frontend
     ports:
-      - "8080:80" # Exposes Nginx on host port 8080, container port 80
-    networks: # Assign to network
+      - "8080:80"
+    networks:
       - app_network
 
   routing_service:
     build: ./routing_service
     ports:
-      - "8000:8000" # Host:Container
+      - "8000:8000"
     volumes:
-      - ./persistent_storage:/persistent_storage
+      - ./persistent_storage:/persistent_storage # Correct mount path
     depends_on:
       - inference_service_model1
       - inference_service_model2
       - inference_service_model3
-      - inference_service_model4 # Added dependency
+      - inference_service_model4
     environment:
-      # Pass environment variables if needed by the service
-      # Example: MODEL_CONFIG_PATH=/persistent_storage/models_config.json
-      PYTHONUNBUFFERED: 1 # For seeing logs immediately
-    networks: # Assign to network
+      PYTHONUNBUFFERED: 1
+    networks:
       - app_network
 
   inference_service_model1:
-    build: ./inference_service_model1
+    build: ./inference_services/model1
     ports:
-      - "8001:8000" # Host:Container
+      - "8001:8000"
     volumes:
-      - ./persistent_storage:/persistent_storage
+      - ./persistent_storage:/persistent_storage # Correct mount path
     environment:
       PYTHONUNBUFFERED: 1
-    networks: # Assign to network
+    networks:
       - app_network
 
   inference_service_model2:
-    build: ./inference_service_model2
+    build: ./inference_services/model2
     ports:
-      - "8002:8000" # Host:Container
+      - "8002:8000"
     volumes:
-      - ./persistent_storage:/persistent_storage
+      - ./persistent_storage:/persistent_storage # Correct mount path
     environment:
       PYTHONUNBUFFERED: 1
-    networks: # Assign to network
+    networks:
       - app_network
 
-  inference_service_model3: # New service entry
-    build: ./inference_service_model3
+  inference_service_model3:
+    build: ./inference_services/model3
     ports:
-      - "8003:8000" # Host:Container
+      - "8003:8000"
     volumes:
-      - ./persistent_storage:/persistent_storage
+      - ./persistent_storage:/persistent_storage # Correct mount path
     environment:
       PYTHONUNBUFFERED: 1
-    networks: # Assign to network
+    networks:
       - app_network
 
-  inference_service_model4: # New service entry
-    build: ./inference_service_model4
+  inference_service_model4:
+    build: ./inference_services/model4
     ports:
-      - "8004:8000" # Host:Container
+      - "8004:8000"
     volumes:
-      - ./persistent_storage:/persistent_storage
+      - ./persistent_storage:/persistent_storage # Correct mount path
     environment:
       PYTHONUNBUFFERED: 1
-    networks: # Assign to network
+    networks:
       - app_network
-  
+
   fine_tuning_service:
     build: ./fine_tuning_service
     ports:
-      - "8005:8000" # Changed port from 8003 to 8005 to avoid conflict
+      - "8005:8000"
     volumes:
-      - ./persistent_storage:/persistent_storage
+      - ./persistent_storage:/persistent_storage # Correct mount path
     environment:
       PYTHONUNBUFFERED: 1
-    networks: # Assign to network
+    networks:
       - app_network
-
-# Optional: Define a top-level network if services need to communicate using hostnames
-# networks:
-#  app_network:
-#    driver: bridge
-
-# Then assign services to this network:
-# services:
-#  frontend:
-#    networks:
-#      - app_network
-#  routing_service:
-#    networks:
-#      - app_network
-# ... and so on for other services.
-# This allows services to reach each other via `http://service_name:container_port`
-# e.g., routing_service can reach inference_service_model1 via http://inference_service_model1:8000

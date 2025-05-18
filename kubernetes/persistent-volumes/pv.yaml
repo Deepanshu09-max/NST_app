@@ -1,11 +1,13 @@
+# filepath: /home/deepanshu/Documents/SPE Major/NST_app/kubernetes/persistent-volumes/pv.yaml
 apiVersion: v1
 kind: PersistentVolume
 metadata:
   name: nst-pv
 spec:
   capacity:
-    storage: 1Gi
+    storage: 2Gi
   accessModes:
     - ReadWriteMany
   hostPath:
-    path: "/mnt/data"
+    path: "/persistent_storage" # Ensure this matches the Minikube mount path
+  persistentVolumeReclaimPolicy: Retain

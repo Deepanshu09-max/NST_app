@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: inference-service
+  template:
+    metadata:
+      labels:
+        app: inference-service
+    spec:
+      containers:
+        - name: inference-service
+          image: inference_model1:latest # Or a generic inference image if you have one
+          imagePullPolicy: IfNotPresent # Changed
+          ports:
+            - containerPort: 8000
+          volumeMounts:
+            - name: model-storage
+              mountPath: /persistent_storage # Updated for consistency
+      volumes:
+        - name: model-storage
+          persistentVolumeClaim:
+            claimName: nst-pvc

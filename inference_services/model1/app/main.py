@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks, HTTPException
 from fastapi.responses import JSONResponse
 import shutil
 import os
@@ -24,7 +24,7 @@ def cleanup_files(files: list):
             os.remove(file_path)
 
 def resolve_model_path(model_path: str):
-    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../persistent_storage/models/model1"))
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../persistent_storage/models/model1"))  # Updated path
     if not model_path or not os.path.isabs(model_path):
         model_dir = base_dir
     else:
@@ -59,11 +59,14 @@ def resolve_model_path(model_path: str):
 
 @app.post("/infer")
 async def infer(
-    background_tasks: BackgroundTasks,
     content_image: UploadFile = File(...),
-    model_path: str = Form(""),
-    image_size: int = Form(512)
+    model_path: str = Form(...)
 ):
+    logger.info(f"Received request with model_path: {model_path}")
+    if not os.path.exists(model_path):
+        logger.error(f"Model file not found: {model_path}")
+        raise HTTPException(status_code=400, detail=f"Model file not found: {model_path}")
+
     temp_content = f"/tmp/{content_image.filename}"
     prefix = f"stylized_{os.path.splitext(content_image.filename)[0]}_{os.urandom(4).hex()}-"
     temp_output_dir = "/tmp"

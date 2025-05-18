@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fine-tuning-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fine-tuning-service
+  template:
+    metadata:
+      labels:
+        app: fine-tuning-service
+    spec:
+      containers:
+        - name: fine-tuning-service
+          image: fine_tuning_service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          volumeMounts:
+            - name: model-storage
+              mountPath: /persistent_storage # Updated for consistency
+      volumes:
+        - name: model-storage
+          persistentVolumeClaim:
+            claimName: nst-pvc
+
