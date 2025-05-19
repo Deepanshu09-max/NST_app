@@ -1,0 +1,35 @@
+---
+- name: Cleanup Kubernetes resources
+  hosts: local
+  gather_facts: no
+
+  tasks:
+    - name: Delete all pods
+      kubernetes.core.k8s:
+        state: absent
+        kind: Pod
+        namespace: default
+
+    - name: Delete Deployments
+      kubernetes.core.k8s:
+        state: absent
+        kind: Deployment
+        namespace: default
+
+    - name: Delete Services
+      kubernetes.core.k8s:
+        state: absent
+        kind: Service
+        namespace: default
+
+    - name: Delete PVCs
+      kubernetes.core.k8s:
+        state: absent
+        kind: PersistentVolumeClaim
+        namespace: default
+
+    - name: Delete ELK resources
+      kubernetes.core.k8s:
+        state: absent
+        kind: Deployment
+        namespace: elk
