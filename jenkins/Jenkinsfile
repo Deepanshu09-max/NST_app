@@ -2,26 +2,36 @@ pipeline {
   agent any
 
   environment {
-    // Docker & Git (only the essentials)
-    DOCKER_REGISTRY       = 'docker.io'
-    DOCKER_CREDENTIALS_ID = 'dockerhub-creds'
-    IMAGE_NAMESPACE       = 'deepanshu0903/nst_app'
-    GIT_CREDENTIALS_ID    = 'github-creds'
-    GIT_REPO              = 'git@github.com:Deepanshu09-max/NST_app.git'
-    GIT_BRANCH            = 'devops'
+    // Vault pulls (see https://plugins.jenkins.io/hashicorp-vault/)
+    DOCKERHUB_USER = vault path: 'secret/nstapp/dockerhub', key: 'username'
+    DOCKERHUB_PASS = vault path: 'secret/nstapp/dockerhub', key: 'password'
+    GITHUB_TOKEN   = vault path: 'secret/nstapp/github',   key: 'token'
+    // KUBECONFIG_B64 = vault path: 'secret/nstapp/kubeconfig', key: 'kubeconfig'
   }
 
   options {
-    // Keep timestamps in the log
     timestamps()
   }
 
   stages {
-    stage('Checkout') {
+    stage('Login to Docker') {
       steps {
-        git branch: "${env.GIT_BRANCH}",
-            credentialsId: "${env.GIT_CREDENTIALS_ID}",
-            url: "${env.GIT_REPO}"
+        // Log in to Docker Hub using Vault-provided creds
+        sh '''
+          echo "$DOCKERHUB_PASS" | docker login -u "$DOCKERHUB_USER" --password-stdin
+        '''
+      }
+    }
+
+    stage('Checkout from GitHub') {
+      steps {
+        // Use a token to clone the private/public repo (branch "devops")
+        // Ensure the repo URL is accessible via HTTPS + token
+        sh '''
+          git config --global credential.helper store
+          git clone --branch devops \
+            https://$GITHUB_TOKEN@github.com/Deepanshu09-max/NST_app.git .
+        '''
       }
     }
 
@@ -29,7 +39,6 @@ pipeline {
       parallel {
         stage('Python Lint') {
           steps {
-            // If you want lint failures to break the build, remove "|| true"
             sh 'flake8 . || true'
           }
         }
@@ -55,15 +64,15 @@ pipeline {
     stage('Build & Push Images') {
       steps {
         script {
-          docker.withRegistry("https://${env.DOCKER_REGISTRY}", env.DOCKER_CREDENTIALS_ID) {
-            // 1) Build and push the shared tf-base image
+          docker.withRegistry("https://index.docker.io/v1/", "${DOCKERHUB_USER}:${DOCKERHUB_PASS}") {
+            // 1) Build & push the shared tf-base image
             def baseImg = docker.build(
-              "${env.IMAGE_NAMESPACE}/tf-base:2.11.0-cpu",
+              "${DOCKERHUB_USER}/nst_app/tf-base:2.11.0-cpu",
               "docker/base-tf"
             )
             baseImg.push()
 
-            // 2) Build and push each service image
+            // 2) Build & push each service image
             def services = [
               'frontend',
               'routing_service',
@@ -76,7 +85,7 @@ pipeline {
 
             for (svc in services) {
               def tagSuffix = svc.replaceAll('/', '-')
-              def imageName = "${env.IMAGE_NAMESPACE}:${tagSuffix}"
+              def imageName = "${DOCKERHUB_USER}/nst_app:${tagSuffix}"
               def img = docker.build(imageName, svc)
               img.push()
             }
@@ -87,10 +96,9 @@ pipeline {
 
     stage('Deploy to Staging') {
       steps {
-        // This assumes you have a docker-compose.yml in the repo root (or adjust the path accordingly).
-        // If you need to log in to a remote Docker host, insert that here.
+        // Launch all services via docker-compose in detached mode
         sh '''
-          echo "Bringing up services in 'staging' mode..."
+          echo "Deploying to STAGING via docker-compose..."
           docker-compose -f docker-compose.yml up -d
         '''
       }
@@ -98,8 +106,7 @@ pipeline {
 
     stage('Integration Tests') {
       steps {
-        // Assumes you’ve committed your bash test script as "run_integration_tests.sh"
-        // and that it runs against the services already up from the "Deploy to Staging" stage.
+        // Assumes run_integration_tests.sh is executable and at repo root
         sh './run_integration_tests.sh'
       }
     }
@@ -113,7 +120,6 @@ pipeline {
       echo '🔴 NST_App pipeline failed.'
     }
     always {
-      // Clean up any dangling Docker images/containers to free space
       sh 'docker system prune -f || true'
     }
   }
