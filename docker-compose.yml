@@ -5,34 +5,60 @@ networks:
     driver: bridge
 
 services:
+  ### 1) Shared Base Image Service
+  # This builds (and tags) the single “tf-base” image that contains:
+  #   • python:3.9-slim
+  #   • tensorflow-cpu==2.11.0
+  #   • numpy==1.25.0
+  #   • scipy==1.11.0
+  #   • Pillow==10.0.0
+  #   • imageio==2.27.0
+  #
+  # Every other service will do “FROM your-registry/myteam/tf-base:2.11.0-cpu” in its Dockerfile,
+  # so they never pip-install TensorFlow again.
+  tf_base:
+    build:
+      context: ./docker/base-tf
+    image: your-docker-registry.com/myteam/tf-base:2.11.0-cpu
+    networks:
+      - app_network
+
+  ### 2) Frontend Service
   frontend:
     build: ./frontend
     image: deepanshu0903/nst_app:frontend
+    depends_on:
+      - tf_base
     ports:
       - "8080:80"
     networks:
       - app_network
 
+  ### 3) Routing Service
   routing_service:
     build: ./routing_service
     image: deepanshu0903/nst_app:routing_service
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./persistent_storage:/persistent_storage
     depends_on:
+      - tf_base
       - inference_service_model1
       - inference_service_model2
       - inference_service_model3
       - inference_service_model4
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./persistent_storage:/persistent_storage
     environment:
       PYTHONUNBUFFERED: 1
     networks:
       - app_network
 
+  ### 4) Inference Service – Model 1
   inference_service_model1:
     build: ./inference_services/model1
     image: deepanshu0903/nst_app:inference_service_model1
+    depends_on:
+      - tf_base
     ports:
       - "8001:8000"
     volumes:
@@ -42,9 +68,12 @@ services:
     networks:
       - app_network
 
+  ### 5) Inference Service – Model 2
   inference_service_model2:
     build: ./inference_services/model2
     image: deepanshu0903/nst_app:inference_service_model2
+    depends_on:
+      - tf_base
     ports:
       - "8002:8000"
     volumes:
@@ -54,9 +83,12 @@ services:
     networks:
       - app_network
 
+  ### 6) Inference Service – Model 3
   inference_service_model3:
     build: ./inference_services/model3
     image: deepanshu0903/nst_app:inference_service_model3
+    depends_on:
+      - tf_base
     ports:
       - "8003:8000"
     volumes:
@@ -66,9 +98,12 @@ services:
     networks:
       - app_network
 
+  ### 7) Inference Service – Model 4
   inference_service_model4:
     build: ./inference_services/model4
     image: deepanshu0903/nst_app:inference_service_model4
+    depends_on:
+      - tf_base
     ports:
       - "8004:8000"
     volumes:
@@ -78,9 +113,12 @@ services:
     networks:
       - app_network
 
+  ### 8) Fine-Tuning Service
   fine_tuning_service:
     build: ./fine_tuning_service
     image: deepanshu0903/nst_app:fine_tuning_service
+    depends_on:
+      - tf_base
     ports:
       - "8005:8000"
     volumes:

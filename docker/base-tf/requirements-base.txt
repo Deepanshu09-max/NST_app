@@ -1,0 +1,6 @@
+# requirements-base.txt
+tensorflow-cpu==2.11.0
+numpy==1.25.0
+scipy==1.11.0
+Pillow==10.0.0
+imageio==2.27.0

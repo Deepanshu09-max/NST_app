@@ -1,5 +1,5 @@
-# Dockerfile for frontend
-# Use a lightweight Nginx image
+# ── frontend/Dockerfile ──
+# (No change—this is a static Nginx frontend.)
 FROM nginx:alpine
 
 # Remove default Nginx configuration
@@ -8,12 +8,8 @@ RUN rm /etc/nginx/conf.d/default.conf
 # Copy custom Nginx configuration
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Copy static frontend files from the build context (./frontend directory)
-# Ensure your index.html and other assets (css, js, images) are in this directory
+# Copy static frontend files (HTML, CSS, JS, images) into Nginx’s www folder
 COPY . /usr/share/nginx/html
 
-# Expose port 80
 EXPOSE 80
-
-# Start Nginx
 CMD ["nginx", "-g", "daemon off;"]
