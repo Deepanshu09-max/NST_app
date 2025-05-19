@@ -20,23 +20,29 @@
       kubernetes.core.k8s:
         state: present
         src: "{{ k8s_manifests_dir }}/persistent-volumes/pvc.yaml"
+        namespace: default
 
-    - name: Apply all deployments
+    - name: Apply all deployment manifests
       kubernetes.core.k8s:
         state: present
-        src: "{{ k8s_manifests_dir }}/deployments"
-        recurse: yes
+        src: "{{ item }}"
+        namespace: default
+      with_fileglob:
+        - "{{ k8s_manifests_dir }}/deployments/*.yaml"
 
-    - name: Apply all services
+    - name: Apply all service manifests
       kubernetes.core.k8s:
         state: present
-        src: "{{ k8s_manifests_dir }}/services"
-        recurse: yes
+        src: "{{ item }}"
+        namespace: default
+      with_fileglob:
+        - "{{ k8s_manifests_dir }}/services/*.yaml"
 
     - name: Apply ingress
       kubernetes.core.k8s:
         state: present
         src: "{{ k8s_manifests_dir }}/ingress/ingress.yaml"
+        namespace: default
 
 
     - name: Wait for all pods to be ready
