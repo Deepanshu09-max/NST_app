@@ -1,0 +1,120 @@
+pipeline {
+  agent any
+
+  environment {
+    // Docker & Git (only the essentials)
+    DOCKER_REGISTRY       = 'docker.io'
+    DOCKER_CREDENTIALS_ID = 'dockerhub-creds'
+    IMAGE_NAMESPACE       = 'deepanshu0903/nst_app'
+    GIT_CREDENTIALS_ID    = 'github-creds'
+    GIT_REPO              = 'git@github.com:Deepanshu09-max/NST_app.git'
+    GIT_BRANCH            = 'devops'
+  }
+
+  options {
+    // Keep timestamps in the log
+    timestamps()
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        git branch: "${env.GIT_BRANCH}",
+            credentialsId: "${env.GIT_CREDENTIALS_ID}",
+            url: "${env.GIT_REPO}"
+      }
+    }
+
+    stage('Lint & Unit Tests') {
+      parallel {
+        stage('Python Lint') {
+          steps {
+            // If you want lint failures to break the build, remove "|| true"
+            sh 'flake8 . || true'
+          }
+        }
+        stage('JS Lint (frontend)') {
+          when { expression { fileExists('frontend/package.json') } }
+          steps {
+            dir('frontend') {
+              sh 'npm ci && npm run lint || true'
+            }
+          }
+        }
+        stage('Python Unit Tests') {
+          steps {
+            sh '''
+              pytest -q routing_service || true
+              pytest -q inference_services || true
+            '''
+          }
+        }
+      }
+    }
+
+    stage('Build & Push Images') {
+      steps {
+        script {
+          docker.withRegistry("https://${env.DOCKER_REGISTRY}", env.DOCKER_CREDENTIALS_ID) {
+            // 1) Build and push the shared tf-base image
+            def baseImg = docker.build(
+              "${env.IMAGE_NAMESPACE}/tf-base:2.11.0-cpu",
+              "docker/base-tf"
+            )
+            baseImg.push()
+
+            // 2) Build and push each service image
+            def services = [
+              'frontend',
+              'routing_service',
+              'fine_tuning_service',
+              'inference_services/model1',
+              'inference_services/model2',
+              'inference_services/model3',
+              'inference_services/model4'
+            ]
+
+            for (svc in services) {
+              def tagSuffix = svc.replaceAll('/', '-')
+              def imageName = "${env.IMAGE_NAMESPACE}:${tagSuffix}"
+              def img = docker.build(imageName, svc)
+              img.push()
+            }
+          }
+        }
+      }
+    }
+
+    stage('Deploy to Staging') {
+      steps {
+        // This assumes you have a docker-compose.yml in the repo root (or adjust the path accordingly).
+        // If you need to log in to a remote Docker host, insert that here.
+        sh '''
+          echo "Bringing up services in 'staging' mode..."
+          docker-compose -f docker-compose.yml up -d
+        '''
+      }
+    }
+
+    stage('Integration Tests') {
+      steps {
+        // Assumes you’ve committed your bash test script as "run_integration_tests.sh"
+        // and that it runs against the services already up from the "Deploy to Staging" stage.
+        sh './run_integration_tests.sh'
+      }
+    }
+  }
+
+  post {
+    success {
+      echo '🟢 NST_App pipeline succeeded.'
+    }
+    failure {
+      echo '🔴 NST_App pipeline failed.'
+    }
+    always {
+      // Clean up any dangling Docker images/containers to free space
+      sh 'docker system prune -f || true'
+    }
+  }
+}

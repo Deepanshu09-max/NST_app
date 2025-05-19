@@ -1,0 +1,85 @@
+pipeline {
+  agent any
+
+  parameters {
+    string(name: 'TRIGGERED_BY', defaultValue: '', description: 'Build number that triggered this')
+  }
+
+  environment {
+    // Docker & Git
+    DOCKER_REGISTRY       = 'docker.io'
+    DOCKER_CREDENTIALS_ID = 'dockerhub-creds'
+    IMAGE_NAMESPACE       = 'deepanshu0903/nst_app'
+
+    // Paths
+    MODEL_OUTPUT_DIR      = 'persistent_storage/models'
+    TRAINER_DIR           = 'fine_tuning_service'
+    TRAINER_IMAGE_TAG     = 'model-trainer:latest'
+  }
+
+  options {
+    timestamps()
+    timeout(time: 6, unit: 'HOURS')   // don’t let it run forever
+    buildDiscarder(logRotator(numToKeepStr: '5'))
+  }
+
+  stages {
+    stage('Checkout') {
+      steps {
+        git branch: 'main',
+            credentialsId: "${env.GIT_CREDENTIALS_ID}",
+            url: "${env.GIT_REPO}"
+      }
+    }
+
+    stage('Build Trainer Image') {
+      steps {
+        dir(TRAINER_DIR) {
+          script {
+            docker.withRegistry("https://${env.DOCKER_REGISTRY}", env.DOCKER_CREDENTIALS_ID) {
+              def img = docker.build("${env.IMAGE_NAMESPACE}:${TRAINER_IMAGE_TAG}", ".")
+              img.push()
+            }
+          }
+        }
+      }
+    }
+
+    stage('Run Training') {
+      steps {
+        sh """
+          docker run --rm \
+            -v \$(pwd)/${MODEL_OUTPUT_DIR}:/models \
+            ${env.IMAGE_NAMESPACE}:${TRAINER_IMAGE_TAG} \
+            python fine_tune.py --output-dir /models
+        """
+      }
+    }
+
+    stage('Publish New Model') {
+      steps {
+        echo "✅ New models should now be in ${MODEL_OUTPUT_DIR} (shared PVC)."
+        // Optionally tag & push inference-service image with updated model
+        // or trigger a rollout via kubectl:
+        sh '''
+          # e.g. roll your deployments to pick up new PVC-mounted models
+          kubectl rollout restart deployment/inference-service-model1
+          kubectl rollout restart deployment/inference-service-model2
+          kubectl rollout restart deployment/inference-service-model3
+          kubectl rollout restart deployment/inference-service-model4
+        '''
+      }
+    }
+  }
+
+  post {
+    success {
+      echo "🏆 FineTuneModels pipeline completed (triggered by #${params.TRIGGERED_BY})."
+    }
+    failure {
+      mail to: 'you@example.com',
+           subject: "💥 Fine‐tune failed (#${BUILD_NUMBER})",
+           body: "Check console output: ${env.BUILD_URL}"
+    }
+  }
+}
