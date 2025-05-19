@@ -1,0 +1,67 @@
+---
+- name: Deploy ELK Stack for NST_app logging
+  hosts: local
+  gather_facts: no
+
+  tasks:
+    - name: Apply Elasticsearch
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ elk_manifests_dir }}/elasticsearch-deployment.yaml"
+        namespace: elk
+
+    - name: Apply Elasticsearch Service
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ elk_manifests_dir }}/elasticsearch-service.yaml"
+        namespace: elk
+
+    - name: Apply Logstash ConfigMap
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ elk_manifests_dir }}/logstash-configmap.yaml"
+        namespace: elk
+
+    - name: Apply Logstash Deployment
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ elk_manifests_dir }}/logstash-deployment.yaml"
+        namespace: elk
+
+    - name: Apply Kibana
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ elk_manifests_dir }}/kibana-deployment.yaml"
+        namespace: elk
+
+    - name: Apply Kibana Service
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ elk_manifests_dir }}/kibana-service.yaml"
+        namespace: elk
+
+    - name: Apply Filebeat RBAC
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ elk_manifests_dir }}/filebeat-rbac.yaml"
+        namespace: elk
+
+    - name: Apply Filebeat Config
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ elk_manifests_dir }}/filebeat-config.yaml"
+        namespace: elk
+
+    - name: Deploy Filebeat DaemonSet
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ elk_manifests_dir }}/filebeat-daemonset.yaml"
+        namespace: elk
+
+    - name: Wait for Elasticsearch to be Running
+      shell: |
+        kubectl wait --for=condition=Ready pod -l app=elasticsearch --namespace=elk --timeout=120s
+
+    - name: Wait for Kibana to be Running
+      shell: |
+        kubectl wait --for=condition=Ready pod -l app=kibana --namespace=elk --timeout=120s

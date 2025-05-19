@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: routing-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: routing-service
+  template:
+    metadata:
+      labels:
+        app: routing-service
+    spec:
+      containers:
+        - name: routing-service
+          image: deepanshu0903/nst_app:routing_service
+          ports:
+            - containerPort: 8000
+          volumeMounts:
+            - name: model-storage
+              mountPath: /persistent_storage
+      volumes:
+        - name: model-storage
+          persistentVolumeClaim:
+            claimName: nst-pvc

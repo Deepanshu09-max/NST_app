@@ -1,19 +1,19 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: frontend
+  name: grafana
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: frontend
+      app: grafana
   template:
     metadata:
       labels:
-        app: frontend
+        app: grafana
     spec:
       containers:
-        - name: frontend
-          image: deepanshu0903/nst_app:frontend
+        - name: grafana
+          image: grafana/grafana:latest
           ports:
-            - containerPort: 80
+            - containerPort: 3000

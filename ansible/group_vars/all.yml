@@ -1,0 +1,14 @@
+# Docker registry and image namespace
+docker_registry: docker.io
+image_namespace: deepanshu0903/nst_app
+
+# Kubernetes manifests root
+k8s_manifests_dir: "{{ playbook_dir }}/../../kubernetes"
+elk_manifests_dir: "{{ k8s_manifests_dir }}/elk"
+
+# Persistent storage paths
+persistent_storage_dir: "{{ playbook_dir }}/../../persistent_storage"
+
+# Model training container (optional)
+model_training_image: model-trainer:latest
+model_training_params: persistent_storage/models

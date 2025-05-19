@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-routing-to-inference
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      app: inference-service-model1
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: routing-service
+      ports:
+        - protocol: TCP
+          port: 8000
+  policyTypes:
+    - Ingress

@@ -1,0 +1,4 @@
+---
+- import_playbook: cleanup.yml
+- import_playbook: deploy-k8s.yml
+- import_playbook: deploy-elk.yml

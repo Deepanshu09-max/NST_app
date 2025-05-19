@@ -1,0 +1,53 @@
+---
+- name: Deploy NST_app to Kubernetes
+  hosts: local
+  gather_facts: no
+
+  tasks:
+    - name: Ensure namespace `default` exists
+      kubernetes.core.k8s:
+        api_version: v1
+        kind: Namespace
+        name: default
+        state: present
+
+    - name: Apply PersistentVolume
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ k8s_manifests_dir }}/persistent-volumes/pv.yaml"
+
+    - name: Apply PersistentVolumeClaim
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ k8s_manifests_dir }}/persistent-volumes/pvc.yaml"
+
+    - name: Apply all deployments
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ k8s_manifests_dir }}/deployments"
+        recurse: yes
+
+    - name: Apply all services
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ k8s_manifests_dir }}/services"
+        recurse: yes
+
+    - name: Apply ingress
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ k8s_manifests_dir }}/ingress/ingress.yaml"
+
+
+    - name: Wait for all pods to be ready
+      kubernetes.core.k8s_info:
+        kind: Pod
+        namespace: default
+      register: pod_list
+
+    - name: Ensure all pods are ready
+      shell: |
+        kubectl wait --for=condition=Ready pod/{{ item.metadata.name }} --namespace=default --timeout=120s
+      loop: "{{ pod_list.resources }}"
+      when: item.status.phase != 'Succeeded'
+
