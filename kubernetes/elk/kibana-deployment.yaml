@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: kibana
+  namespace: elk
 spec:
   replicas: 1
   selector:
@@ -13,10 +14,10 @@ spec:
         app: kibana
     spec:
       containers:
-        - name: kibana
-          image: docker.elastic.co/kibana/kibana:7.10.2
-          ports:
-            - containerPort: 5601
-          env:
-            - name: ELASTICSEARCH_HOSTS
-              value: http://elasticsearch:9200
+      - name: kibana
+        image: docker.elastic.co/kibana/kibana:7.17.0
+        ports:
+        - containerPort: 5601
+        env:
+        - name: ELASTICSEARCH_HOSTS
+          value: http://elasticsearch:9200
