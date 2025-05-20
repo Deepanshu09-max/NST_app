@@ -5,21 +5,10 @@ networks:
     driver: bridge
 
 services:
-  ### 1) Shared Base Image Service
-  # This builds (and tags) the single “tf-base” image that contains:
-  #   • python:3.9-slim
-  #   • tensorflow-cpu==2.11.0
-  #   • numpy==1.25.0
-  #   • scipy==1.11.0
-  #   • Pillow==10.0.0
-  #   • imageio==2.27.0
-  #
-  # Every other service will do “FROM your-registry/myteam/tf-base:2.11.0-cpu” in its Dockerfile,
-  # so they never pip-install TensorFlow again.
   tf_base:
     build:
       context: ./docker/base-tf
-    image: your-docker-registry.com/myteam/tf-base:2.11.0-cpu
+    image: deepanshu0903/nst_app:tf-base
     networks:
       - app_network
 

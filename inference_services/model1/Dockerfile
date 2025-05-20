@@ -1,6 +1,6 @@
 # ── inference_services/model1/Dockerfile ──
 # Start from the shared TF-base (no need to reinstall TF or its dependencies)
-FROM deepanshu0903/tf-base:2.11.0-cpu
+FROM deepanshu0903/nst_app:tf-base
 
 WORKDIR /app
 

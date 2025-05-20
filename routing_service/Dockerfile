@@ -1,4 +1,4 @@
-FROM deepanshu0903/tf-base:2.11.0-cpu
+FROM deepanshu0903/nst_app:tf-base
 
 WORKDIR /app
 

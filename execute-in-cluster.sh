@@ -1,9 +1,9 @@
-# #!/usr/bin/env bash
-# set -euo pipefail
+# !/usr/bin/env bash
+set -euo pipefail
 
 
 # echo "🗑️  Deleting existing Minikube cluster..."
-# minikube delete || echo "  > No existing cluster to delete."
+minikube delete || echo "  > No existing cluster to delete."
 
 
 
@@ -20,6 +20,12 @@ minikube start --memory=4096 --cpus=4
 #   --uid=$(id -u) --gid=$(id -g) > /tmp/minikube-mount.log 2>&1 &
 
 
+
+echo "🔐 Mounting host persistent_storage into Minikube..." && minikube mount "/home/deepanshu/Documents/SPE Major/NST_app/persistent_storage":/persistent_storage --uid=$(id -u) --gid=$(id -g) > /tmp/minikube-mount.log 2>&1 &
+
+
+
+eval $(minikube docker-env)
 kubectl create namespace elk
 # 1. Elasticsearch
 kubectl apply -f kubernetes/elk/elasticsearch-deployment.yaml
@@ -40,15 +46,15 @@ kubectl apply -f kubernetes/elk/filebeat-daemonset.yaml
 
 kubectl get pods -n elk -w
 kubectl describe pod pod-name -n elk
-kubectl
+kubectl delete pods --all -n elk
+
+kubectl delete all --all -n elk
+
 
 
 
 eval $(minikube docker-env)
 docker-compose up --build
-
-
-echo "🔐 Mounting host persistent_storage into Minikube..." && minikube mount "/home/deepanshu/Documents/SPE Major/NST_app/persistent_storage":/persistent_storage --uid=$(id -u) --gid=$(id -g) > /tmp/minikube-mount.log 2>&1 &
 
 echo "⏱️  Waiting 3 seconds for mount to be established..."
 sleep 3
