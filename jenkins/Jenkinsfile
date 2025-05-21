@@ -4,8 +4,8 @@ pipeline {
   environment {
     GITHUB_REPO_URL        = 'https://github.com/Deepanshu09-max/NST_app.git'
     GIT_BRANCH             = 'devops'
-    DOCKER_CREDS           = 'dockerhub-credentials'   // Jenkins Username/Password creds
-    KUBECONFIG_CRED        = 'minikube-kubeconfig'         // Jenkins “Secret file” for kubeconfig
+    DOCKER_CREDS           = 'dockerhub-credentials'     // Jenkins Username/Password creds
+    KUBECONFIG_CRED        = 'minikube-kubeconfig'       // Jenkins “Secret file” for kubeconfig
     FINE_TUNE_JOB          = 'NST_Fine_Tune_Job'
     BAD_FEEDBACK_THRESHOLD = 5
   }
@@ -16,9 +16,10 @@ pipeline {
   }
 
   stages {
+
     stage('Pre-flight: Docker login & Kubeconfig') {
       steps {
-        // Docker login
+        // 1) Docker login
         withCredentials([usernamePassword(
           credentialsId: "${DOCKER_CREDS}",
           usernameVariable: 'DOCKER_USER',
@@ -28,15 +29,14 @@ pipeline {
             echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
           '''
         }
-
-        // Pull kubeconfig from Jenkins and sanity-check kubectl
+        // 2) Load kubeconfig so future kubectl/ansible calls work
         withCredentials([file(
           credentialsId: "${KUBECONFIG_CRED}",
           variable: 'KUBE_CONFIG'
         )]) {
           sh '''
-            echo "▶ Using KUBECONFIG from Jenkins credentials"
             export KUBECONFIG=$KUBE_CONFIG
+            echo "🛠️  Using KUBECONFIG from Jenkins credentials"
             kubectl version --client
           '''
         }
@@ -45,86 +45,102 @@ pipeline {
 
     stage('Checkout') {
       steps {
-        git branch: "${GIT_BRANCH}",
-            url:    "${GITHUB_REPO_URL}"
+        git branch: "${GIT_BRANCH}", url: "${GITHUB_REPO_URL}"
+      }
+    }
+
+    stage('Prepare Persistent Storage') {
+      steps {
+        sh '''
+          # Remove any old link
+          rm -rf persistent_storage
+          
+          # Link in your host’s true persistent_storage
+          ln -s /data/persistent_storage persistent_storage
+          
+          # Verify
+          ls -l persistent_storage
+        '''
+      }
+    }
+
+
+    stage('Build & Up Services (Docker-Compose)') {
+      steps {
+        // Build the images and bring up all containers
+        sh '''
+          echo "🔨 Building & starting all services via docker-compose"
+          docker-compose up -d --build
+        '''
       }
     }
 
     stage('Integration Tests') {
       steps {
-        sh './testing.sh'
+        // Runs your testing.sh (assumes it no longer does its own compose up)
+        sh '''
+          chmod +x testing.sh
+          ./testing.sh
+        '''
       }
     }
 
-    stage('Build & Push Images') {
+    stage('Tag & Push Images') {
       steps {
-        script {
-          // Build everything via docker-compose
-          sh 'docker-compose build'
-
-          // Tag & push
-          withCredentials([usernamePassword(
-            credentialsId: "${DOCKER_CREDS}",
-            usernameVariable: 'DOCKER_USER',
-            passwordVariable: 'DOCKER_PASS'
-          )]) {
-            sh '''
-              echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-            '''
-            def images = [
-              'base-tf',
-              'frontend',
-              'routing_service',
-              'fine_tuning_service',
-              'inference_service_model1',
-              'inference_service_model2',
-              'inference_service_model3',
-              'inference_service_model4'
-            ]
-            images.each { svc ->
-              sh """
-                docker tag nst_app_${svc}:latest \
-                  \$DOCKER_USER/nst_app:${svc}
-                docker push \$DOCKER_USER/nst_app:${svc}
-              """
-            }
-          }
-        }
-      }
-    }
-
-    stage('Deploy to K8s & ELK') {
-      steps {
-        withCredentials([file(
-          credentialsId: "${KUBECONFIG_CRED}",
-          variable: 'KUBE_CONFIG'
+        withCredentials([usernamePassword(
+          credentialsId: "${DOCKER_CREDS}",
+          usernameVariable: 'DOCKER_USER',
+          passwordVariable: 'DOCKER_PASS'
         )]) {
           sh '''
-            export KUBECONFIG=$KUBE_CONFIG
-            cd ansible/playbooks
-            ansible-playbook -i ../inventory.ini umbrella-playbook.yml
+            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+            IMAGES=(
+              base-tf
+              frontend
+              routing_service
+              fine_tuning_service
+              inference_service_model1
+              inference_service_model2
+              inference_service_model3
+              inference_service_model4
+            )
+            for svc in "${IMAGES[@]}"; do
+              echo "🔖 Tagging and pushing nst_app_${svc}:latest → $DOCKER_USER/nst_app:${svc}"
+              docker tag nst_app_${svc}:latest $DOCKER_USER/nst_app:${svc}
+              docker push $DOCKER_USER/nst_app:${svc}
+            done
           '''
         }
+      }
+    }
+
+    stage('Deploy to K8s & ELK (Ansible)') {
+      steps {
+        // Calls your umbrella playbook that includes both k8s and ELK
+        sh '''
+          export KUBECONFIG=$KUBE_CONFIG
+          cd ansible/playbooks
+          ansible-playbook -i ../inventory.ini umbrella-playbook.yml
+        '''
       }
     }
 
     stage('Check Feedback & Trigger Fine-Tuning') {
       steps {
         script {
-          // count "bad" lines in the newline-delimited JSON
           def badCount = readFile('persistent_storage/feedback.jsonl')
-                           .readLines()
-                           .count { it.contains('"feedback":"bad"') }
-          echo "🔍 Bad feedbacks: ${badCount}"
+                               .readLines()
+                               .count { it.contains('"feedback":"bad"') }
+          echo "🔍 Bad feedback count: ${badCount}"
           if (badCount >= BAD_FEEDBACK_THRESHOLD.toInteger()) {
-            echo "🚀 Triggering fine-tune job (${FINE_TUNE_JOB})"
+            echo "🚀 Threshold exceeded, triggering ${FINE_TUNE_JOB}"
             build job: "${FINE_TUNE_JOB}",
                   wait: false,
                   parameters: [
                     string(name: 'BAD_FEEDBACK_COUNT', value: badCount.toString())
                   ]
           } else {
-            echo "✅ No fine-tune needed (threshold = ${BAD_FEEDBACK_THRESHOLD})"
+            echo "✅ Feedback below threshold (${BAD_FEEDBACK_THRESHOLD}), skipping fine-tune"
           }
         }
       }
@@ -132,8 +148,19 @@ pipeline {
   }
 
   post {
-    success { echo '✅ Pipeline completed successfully.' }
-    failure { echo '❌ Pipeline failed — please inspect logs.' }
-    always  { sh 'docker system prune -af || true' }
+    success {
+      echo '✅ Pipeline completed successfully.'
+    }
+    failure {
+      echo '❌ Pipeline failed — check the logs.'
+    }
+    always {
+      // tear down any running containers and clean up images
+      sh '''
+        echo "🧹 Cleaning up Docker containers & images"
+        docker-compose down --remove-orphans
+        docker system prune -af || true
+      '''
+    }
   }
 }
