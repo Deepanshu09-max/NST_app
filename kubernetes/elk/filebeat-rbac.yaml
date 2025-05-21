@@ -1,3 +1,5 @@
+# filebeat-rbac.yaml
+---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -10,8 +12,20 @@ metadata:
   name: filebeat
 rules:
   - apiGroups: [""]
-    resources: ["pods", "namespaces"]
-    verbs: ["get", "watch", "list"]
+    resources:
+      - pods
+      - nodes
+      - namespaces
+      - endpoints
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources:
+      - replicasets
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["extensions"]
+    resources:
+      - deployments
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
