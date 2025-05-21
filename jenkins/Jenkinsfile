@@ -2,125 +2,138 @@ pipeline {
   agent any
 
   environment {
-    // Vault pulls (see https://plugins.jenkins.io/hashicorp-vault/)
-    DOCKERHUB_USER = vault path: 'secret/nstapp/dockerhub', key: 'username'
-    DOCKERHUB_PASS = vault path: 'secret/nstapp/dockerhub', key: 'password'
-    GITHUB_TOKEN   = vault path: 'secret/nstapp/github',   key: 'token'
-    // KUBECONFIG_B64 = vault path: 'secret/nstapp/kubeconfig', key: 'kubeconfig'
+    GITHUB_REPO_URL        = 'https://github.com/Deepanshu09-max/NST_app.git'
+    GIT_BRANCH             = 'devops'
+    DOCKER_CREDS           = 'dockerhub-credentials'   // Jenkins Username/Password creds
+    KUBECONFIG_CRED        = 'minikube-kubeconfig'         // Jenkins “Secret file” for kubeconfig
+    FINE_TUNE_JOB          = 'NST_Fine_Tune_Job'
+    BAD_FEEDBACK_THRESHOLD = 5
   }
 
   options {
     timestamps()
+    buildDiscarder(logRotator(numToKeepStr: '10'))
   }
 
   stages {
-    stage('Login to Docker') {
+    stage('Pre-flight: Docker login & Kubeconfig') {
       steps {
-        // Log in to Docker Hub using Vault-provided creds
-        sh '''
-          echo "$DOCKERHUB_PASS" | docker login -u "$DOCKERHUB_USER" --password-stdin
-        '''
+        // Docker login
+        withCredentials([usernamePassword(
+          credentialsId: "${DOCKER_CREDS}",
+          usernameVariable: 'DOCKER_USER',
+          passwordVariable: 'DOCKER_PASS'
+        )]) {
+          sh '''
+            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+          '''
+        }
+
+        // Pull kubeconfig from Jenkins and sanity-check kubectl
+        withCredentials([file(
+          credentialsId: "${KUBECONFIG_CRED}",
+          variable: 'KUBE_CONFIG'
+        )]) {
+          sh '''
+            echo "▶ Using KUBECONFIG from Jenkins credentials"
+            export KUBECONFIG=$KUBE_CONFIG
+            kubectl version --client
+          '''
+        }
       }
     }
 
-    stage('Checkout from GitHub') {
+    stage('Checkout') {
       steps {
-        // Use a token to clone the private/public repo (branch "devops")
-        // Ensure the repo URL is accessible via HTTPS + token
-        sh '''
-          git config --global credential.helper store
-          git clone --branch devops \
-            https://$GITHUB_TOKEN@github.com/Deepanshu09-max/NST_app.git .
-        '''
+        git branch: "${GIT_BRANCH}",
+            url:    "${GITHUB_REPO_URL}"
       }
     }
 
-    stage('Lint & Unit Tests') {
-      parallel {
-        stage('Python Lint') {
-          steps {
-            sh 'flake8 . || true'
-          }
-        }
-        stage('JS Lint (frontend)') {
-          when { expression { fileExists('frontend/package.json') } }
-          steps {
-            dir('frontend') {
-              sh 'npm ci && npm run lint || true'
-            }
-          }
-        }
-        stage('Python Unit Tests') {
-          steps {
-            sh '''
-              pytest -q routing_service || true
-              pytest -q inference_services || true
-            '''
-          }
-        }
+    stage('Integration Tests') {
+      steps {
+        sh './testing.sh'
       }
     }
 
     stage('Build & Push Images') {
       steps {
         script {
-          docker.withRegistry("https://index.docker.io/v1/", "${DOCKERHUB_USER}:${DOCKERHUB_PASS}") {
-            // 1) Build & push the shared tf-base image
-            def baseImg = docker.build(
-              "${DOCKERHUB_USER}/nst_app/tf-base:2.11.0-cpu",
-              "docker/base-tf"
-            )
-            baseImg.push()
+          // Build everything via docker-compose
+          sh 'docker-compose build'
 
-            // 2) Build & push each service image
-            def services = [
+          // Tag & push
+          withCredentials([usernamePassword(
+            credentialsId: "${DOCKER_CREDS}",
+            usernameVariable: 'DOCKER_USER',
+            passwordVariable: 'DOCKER_PASS'
+          )]) {
+            sh '''
+              echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+            '''
+            def images = [
+              'base-tf',
               'frontend',
               'routing_service',
               'fine_tuning_service',
-              'inference_services/model1',
-              'inference_services/model2',
-              'inference_services/model3',
-              'inference_services/model4'
+              'inference_service_model1',
+              'inference_service_model2',
+              'inference_service_model3',
+              'inference_service_model4'
             ]
-
-            for (svc in services) {
-              def tagSuffix = svc.replaceAll('/', '-')
-              def imageName = "${DOCKERHUB_USER}/nst_app:${tagSuffix}"
-              def img = docker.build(imageName, svc)
-              img.push()
+            images.each { svc ->
+              sh """
+                docker tag nst_app_${svc}:latest \
+                  \$DOCKER_USER/nst_app:${svc}
+                docker push \$DOCKER_USER/nst_app:${svc}
+              """
             }
           }
         }
       }
     }
 
-    stage('Deploy to Staging') {
+    stage('Deploy to K8s & ELK') {
       steps {
-        // Launch all services via docker-compose in detached mode
-        sh '''
-          echo "Deploying to STAGING via docker-compose..."
-          docker-compose -f docker-compose.yml up -d
-        '''
+        withCredentials([file(
+          credentialsId: "${KUBECONFIG_CRED}",
+          variable: 'KUBE_CONFIG'
+        )]) {
+          sh '''
+            export KUBECONFIG=$KUBE_CONFIG
+            cd ansible/playbooks
+            ansible-playbook -i ../inventory.ini umbrella-playbook.yml
+          '''
+        }
       }
     }
 
-    stage('Integration Tests') {
+    stage('Check Feedback & Trigger Fine-Tuning') {
       steps {
-        // Assumes run_integration_tests.sh is executable and at repo root
-        sh './run_integration_tests.sh'
+        script {
+          // count "bad" lines in the newline-delimited JSON
+          def badCount = readFile('persistent_storage/feedback.jsonl')
+                           .readLines()
+                           .count { it.contains('"feedback":"bad"') }
+          echo "🔍 Bad feedbacks: ${badCount}"
+          if (badCount >= BAD_FEEDBACK_THRESHOLD.toInteger()) {
+            echo "🚀 Triggering fine-tune job (${FINE_TUNE_JOB})"
+            build job: "${FINE_TUNE_JOB}",
+                  wait: false,
+                  parameters: [
+                    string(name: 'BAD_FEEDBACK_COUNT', value: badCount.toString())
+                  ]
+          } else {
+            echo "✅ No fine-tune needed (threshold = ${BAD_FEEDBACK_THRESHOLD})"
+          }
+        }
       }
     }
   }
 
   post {
-    success {
-      echo '🟢 NST_App pipeline succeeded.'
-    }
-    failure {
-      echo '🔴 NST_App pipeline failed.'
-    }
-    always {
-      sh 'docker system prune -f || true'
-    }
+    success { echo '✅ Pipeline completed successfully.' }
+    failure { echo '❌ Pipeline failed — please inspect logs.' }
+    always  { sh 'docker system prune -af || true' }
   }
 }
