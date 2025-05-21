@@ -1,0 +1,7 @@
+/* Light red background for inline code spans */
+code, kbd, samp, tt {
+  background-color: #FFD6D6 !important;  /* light red */
+  color:           #0A0000   !important;  /* dark text for contrast */
+  padding:         0.1em 0.2em !important; 
+  border-radius:   3px       !important;
+}

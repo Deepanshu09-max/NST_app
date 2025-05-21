@@ -11,6 +11,32 @@ data:
       }
     }
 
+    filter {
+      # Example: parse typical Docker JSON logs
+      json {
+        source => "message"
+        target => "docker"
+        remove_field => ["message"]
+      }
+
+      # Example: grok out timestamp & level if your container logs include them
+      if [docker][log] =~ /^\d{4}/ {
+        grok {
+          match => { "[docker][log]" => "%{TIMESTAMP_ISO8601:log_ts} %{LOGLEVEL:level} %{GREEDYDATA:msg}" }
+          remove_field => ["[docker][log]"]
+        }
+        date {
+          match => [ "log_ts", "ISO8601" ]
+          target => "@timestamp"
+        }
+      }
+
+      # Add Kubernetes metadata if you want more fields
+      kubernetes {
+        # in-cluster configuration is automatic since beats add kubernetes metadata
+      }
+    }
+
     output {
       elasticsearch {
         hosts => ["http://elasticsearch:9200"]

@@ -1,0 +1,6 @@
+# requirements-base.txt
+tensorflow
+numpy
+scipy
+Pillow
+imageio

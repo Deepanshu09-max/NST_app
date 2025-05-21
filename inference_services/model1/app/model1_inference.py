@@ -145,7 +145,7 @@ def get_images(paths, height=None, width=None):
 
     images = []
     for path in paths:
-        image = imread(path, mode='RGB')
+        image = imread(path, mode='RGB')  # Reverted to use mode='RGB'
 
         if height is not None and width is not None:
             # Remove interp argument, just pass size
