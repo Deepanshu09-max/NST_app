@@ -3,7 +3,7 @@
 set -e # Exit immediately if a command exits with a non-zero status.
 
 # Define base directory for the application
-APP_DIR="NST_app"
+APP_DIR="."
 PERSISTENT_STORAGE_DIR="$APP_DIR/persistent_storage"
 INPUT_IMAGES_DIR="$PERSISTENT_STORAGE_DIR/input_images"
 MODELS_DIR="$PERSISTENT_STORAGE_DIR/models"
