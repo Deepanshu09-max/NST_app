@@ -16,7 +16,7 @@
 
 
 ## **Project Requirements**
-![Project Requirements](./images/ps.png)
+![Project Requirements](report/images/ps.png)
 
 More details about the problem statement can be found in [this](./Mini%20Project_Scientific%20Calculator.pdf) document.
 
@@ -167,7 +167,7 @@ The **Neural Style Transfer (NST) platform** is a fully end‑to‑end system th
 
 
   **Live Image Preview and Feedback Integration**
-  ![Alt text describing the image](./images/f-index.png)
+  ![Alt text describing the image](report/images/f-index.png)
 
 - **UI:** 
   - Modern, responsive HTML5 interface.
@@ -181,7 +181,7 @@ The **Neural Style Transfer (NST) platform** is a fully end‑to‑end system th
   - Smart error handling and user guidance.
 
   **Live Image Preview and Feedback Integration**
-  ![Alt text describing the image](images/i1.png)
+  ![Alt text describing the image](report/images/i1.png)
 
   **Front-End Web Development**
 
@@ -212,7 +212,7 @@ The **Neural Style Transfer (NST) platform** is a fully end‑to‑end system th
   - Handles errors gracefully, logs all steps, and manages persistent storage directories.
 
   **Innovative Snippet: Dynamic Model Routing and Checkpoint Resolution**
-  ![Alt text describing the image](images/i2.png)
+  ![Alt text describing the image](report/images/i2.png)
 
   **General Concept: API Gateways**
 
@@ -240,7 +240,7 @@ The **Neural Style Transfer (NST) platform** is a fully end‑to‑end system th
   - Containerized for isolated, scalable deployment.
 
   **Innovative Snippet: Robust TensorFlow Checkpoint Loading and Inference**
-  ![Alt text describing the image](images/i3.png)
+  ![Alt text describing the image](report/images/i3.png)
 
   **General Concept: Microservices**
 
@@ -259,21 +259,21 @@ The **Neural Style Transfer (NST) platform** is a fully end‑to‑end system th
     - TensorFlow 1.x compatible, with custom layers and instance normalization.
 
   **Innovative Snippet: Efficient Image Transformation Network**
-  ![Alt text describing the image](images/i5.png)
+  ![Alt text describing the image](report/images/i5.png)
 
   **Inference and Results**
 
   **Input Image**
-  ![Input Image](images/input.jpeg)
+  ![Input Image](report/images/input.jpeg)
 
   **Stylized outputs by the models**
 
   | Model   | Style Image            | Output Image         |
   | ------- | ---------------------- | -------------------- |
-  | Model 1 | ![](images/style1.jpg) | ![](images/op1.jpeg) |
-  | Model 2 | ![](images/style2.jpg) | ![](images/op2.jpeg) |
-  | Model 3 | ![](images/style3.jpg) | ![](images/op3.jpeg) |
-  | Model 4 | ![](images/style4.jpg) | ![](images/op4.jpeg) |
+  | Model 1 | ![](report/images/style1.jpg) | ![](report/images/op1.jpeg) |
+  | Model 2 | ![](report/images/style2.jpg) | ![](report/images/op2.jpeg) |
+  | Model 3 | ![](report/images/style3.jpg) | ![](report/images/op3.jpeg) |
+  | Model 4 | ![](report/images/style4.jpg) | ![](report/images/op4.jpeg) |
 
 ####  Fine-Tuning Service 
 
@@ -285,7 +285,7 @@ The **Neural Style Transfer (NST) platform** is a fully end‑to‑end system th
   - Updates `latest.txt` in model directories for routing/inference services.
 
   **Automated Model Versioning and Checkpoint Management**
-  ![Alt text describing the image](images/i6.png)
+  ![Alt text describing the image](report/images/i6.png)
 
   **General Concept: Continuous Learning and Fine-Tuning**
 
@@ -483,7 +483,7 @@ These Docker and CI/CD specifics ensure that every change to our codebase—be i
 - **Prometheus/Grafana:** [`kubernetes/monitoring/`](kubernetes/monitoring/): Placeholders for metrics stack and dashboards.
 
 **Innovative Snippet: Persistent Volume Claim for Model and Data Sharing**
-![Alt text describing the image](images/i8.png)
+![Alt text describing the image](report/images/i8.png)
 
 **Running the Application using Kubernetes (Step-by-Step)**
 
@@ -535,7 +535,7 @@ These Docker and CI/CD specifics ensure that every change to our codebase—be i
 8.  **Verify the Deployment:**
 
   - Once the playbook has completed, verify that all the services are running correctly by checking the status of the deployments and pods:
-    ![Alt text describing the image](images/i9.png)
+    ![Alt text describing the image](report/images/i9.png)
 
     - `kubectl get deployments`: This command lists all the deployments in the Kubernetes cluster.
     - `kubectl get pods`: This command lists all the pods in the Kubernetes cluster.
@@ -688,7 +688,7 @@ The main Jenkins pipeline orchestrates the entire DevOps lifecycle for the NST p
 
 8. **Cleanup:**  
    After every run, the pipeline prunes unused Docker images to keep the build agents clean and efficient.
-         ![Alt text describing the image](images/jenkins1.png)
+         ![Alt text describing the image](report/images/jenkins1.png)
 
 **Why this design?**  
 This pipeline is crafted for speed, safety, and continuous improvement. By parallelizing checks, automating deployments, and integrating feedback-driven retraining, it enables rapid iteration while maintaining high reliability. The use of secure credentials, parameterized production deploys, and automated cleanups reflects best practices in modern DevOps.
@@ -715,7 +715,7 @@ The FineTuneModels Jenkins job is a specialized, parameterized pipeline designed
      If anything goes wrong, an email notification is sent to the relevant stakeholders, including a link to the build logs for rapid troubleshooting.
    - **Always:**  
      Regardless of outcome, the pipeline logs completion, ensuring that every run is accounted for.
-           ![Alt text describing the image](images/jenkins2.png)
+           ![Alt text describing the image](report/images/jenkins2.png)
 
 **Why this design?**  
 This pipeline empowers both automation and developer-driven experimentation. By parameterizing every aspect of the fine-tuning process, it supports rapid iteration, reproducibility, and easy integration with the main CI/CD flow. The ability to automatically re-trigger the main pipeline ensures that improvements are quickly propagated to users, while robust notifications and logging keep the team informed.
