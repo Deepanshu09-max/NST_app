@@ -20,7 +20,7 @@ services:
       - tf_base
       - routing_service
     ports:
-      - "8080:80"
+      - "80:80"
     networks:
       - app_network
 
@@ -30,21 +30,21 @@ services:
     image: deepanshu0903/nst_app:routing_service
     depends_on:
       - tf_base
-      - inference_service_model1
-      - inference_service_model2
-      - inference_service_model3
-      - inference_service_model4
+      - inference-service-model1
+      - inference-service-model2
+      - inference-service-model3
+      - inference-service-model4
     ports:
       - "8000:8000"
     volumes:
-      - ./persistent_storage:/persistent_storage
+      - ${HOST_PERSISTENT_STORAGE}:/persistent_storage
     environment:
       PYTHONUNBUFFERED: 1
     networks:
       - app_network
 
   ### 4) Inference Service – Model 1
-  inference_service_model1:
+  inference-service-model1:
     build: ./inference_services/model1
     image: deepanshu0903/nst_app:inference_service_model1
     depends_on:
@@ -52,14 +52,14 @@ services:
     ports:
       - "8001:8000"
     volumes:
-      - ./persistent_storage:/persistent_storage
+      - ${HOST_PERSISTENT_STORAGE}:/persistent_storage
     environment:
       PYTHONUNBUFFERED: 1
     networks:
       - app_network
 
   ### 5) Inference Service – Model 2
-  inference_service_model2:
+  inference-service-model2:
     build: ./inference_services/model2
     image: deepanshu0903/nst_app:inference_service_model2
     depends_on:
@@ -67,14 +67,14 @@ services:
     ports:
       - "8002:8000"
     volumes:
-      - ./persistent_storage:/persistent_storage
+      - ${HOST_PERSISTENT_STORAGE}:/persistent_storage
     environment:
       PYTHONUNBUFFERED: 1
     networks:
       - app_network
 
   ### 6) Inference Service – Model 3
-  inference_service_model3:
+  inference-service-model3:
     build: ./inference_services/model3
     image: deepanshu0903/nst_app:inference_service_model3
     depends_on:
@@ -82,14 +82,14 @@ services:
     ports:
       - "8003:8000"
     volumes:
-      - ./persistent_storage:/persistent_storage
+      - ${HOST_PERSISTENT_STORAGE}:/persistent_storage
     environment:
       PYTHONUNBUFFERED: 1
     networks:
       - app_network
 
   ### 7) Inference Service – Model 4
-  inference_service_model4:
+  inference-service-model4:
     build: ./inference_services/model4
     image: deepanshu0903/nst_app:inference_service_model4
     depends_on:
@@ -97,7 +97,7 @@ services:
     ports:
       - "8004:8000"
     volumes:
-      - ./persistent_storage:/persistent_storage
+      - ${HOST_PERSISTENT_STORAGE}:/persistent_storage
     environment:
       PYTHONUNBUFFERED: 1
     networks:
@@ -112,7 +112,7 @@ services:
     ports:
       - "8005:8000"
     volumes:
-      - ./persistent_storage:/persistent_storage
+      - ${HOST_PERSISTENT_STORAGE}:/persistent_storage
     environment:
       PYTHONUNBUFFERED: 1
     networks:

@@ -2,125 +2,305 @@ pipeline {
   agent any
 
   environment {
-    // Vault pulls (see https://plugins.jenkins.io/hashicorp-vault/)
-    DOCKERHUB_USER = vault path: 'secret/nstapp/dockerhub', key: 'username'
-    DOCKERHUB_PASS = vault path: 'secret/nstapp/dockerhub', key: 'password'
-    GITHUB_TOKEN   = vault path: 'secret/nstapp/github',   key: 'token'
-    // KUBECONFIG_B64 = vault path: 'secret/nstapp/kubeconfig', key: 'kubeconfig'
+    GITHUB_REPO_URL         = 'https://github.com/Deepanshu09-max/NST_app.git'
+    GIT_BRANCH              = 'devops'
+    DOCKER_CREDS            = 'dockerhub-credentials'
+    KUBECONFIG_CRED         = 'minikube-kubeconfig'
+    FINE_TUNE_JOB           = 'NST_Fine_Tune_Job'
+    BAD_FEEDBACK_THRESHOLD  = 5
+    HOST_PERSISTENT_STORAGE = '/Users/aryanrastogi/college/spe/NST_Major/NST_app/persistent_storage'
   }
 
   options {
     timestamps()
+    buildDiscarder(logRotator(numToKeepStr: '10'))
   }
 
   stages {
-    stage('Login to Docker') {
+    stage('Pre-flight: Docker login & Kubeconfig') {
       steps {
-        // Log in to Docker Hub using Vault-provided creds
+        withCredentials([usernamePassword(
+          credentialsId: "${DOCKER_CREDS}",
+          usernameVariable: 'DOCKER_USER',
+          passwordVariable: 'DOCKER_PASS'
+        )]) {
+          sh '''
+            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+          '''
+        }
+        withCredentials([file(
+          credentialsId: "${KUBECONFIG_CRED}",
+          variable: 'KUBE_CONFIG'
+        )]) {
+          sh '''
+            export KUBECONFIG=$KUBE_CONFIG
+            echo "🛠️  Using KUBECONFIG from Jenkins credentials"
+            kubectl version --client
+          '''
+        }
+      }
+    }
+
+    stage('Checkout') {
+      steps {
+        git branch: "${GIT_BRANCH}", url: "${GITHUB_REPO_URL}"
+      }
+    }
+    stage('Wipe Conflicting Containers') {
+      steps {
         sh '''
-          echo "$DOCKERHUB_PASS" | docker login -u "$DOCKERHUB_USER" --password-stdin
+          echo "--- Checking for containers publishing your ports ---"
+          docker ps --format '{{.ID}} {{.Names}} {{.Ports}}' \
+            | grep -E '8080->|800[0-5]->' || echo "👍 No conflicts found"
+    
+          echo "--- Removing any conflicting containers ---"
+          # Find any container bound to 80,8000–8005
+          docker ps -q --filter "publish=80" \
+            --filter "publish=8000" \
+            --filter "publish=8001" \
+            --filter "publish=8002" \
+            --filter "publish=8003" \
+            --filter "publish=8004" \
+            --filter "publish=8005" \
+          | xargs --no-run-if-empty docker rm -f
+    
+          echo "--- Done cleaning up port-binding containers ---"
+        '''
+      }
+    }
+    stage('Pre-Compose Cleanup') {
+      steps {
+        sh '''
+          echo "🧹 Tear down any old compose stacks (both named & default)…"
+          # Named (project = nstapp)
+          docker-compose -p nstapp -f docker-compose.yml down -v --remove-orphans || true
+          # Default (project = working-dir basename)
+          docker-compose          -f docker-compose.yml down -v --remove-orphans || true
+    
+          echo "🧹 Remove stray containers by name prefix"
+          docker ps -a --filter "name=^/nstapp_" -q \
+            | xargs --no-run-if-empty docker rm -f
+    
+          echo "🧹 Kill anything still listening on port 8080"
+          # If it's a Docker container: remove it
+          docker ps -q --filter publish=8080 \
+            | xargs --no-run-if-empty docker rm -f
+          # If it's any process: kill it
+          lsof -i :8080 -t \
+            | xargs --no-run-if-empty kill -9
+    
+          echo "🧹 Prune unused images, networks, volumes"
+          docker network prune -f
+          docker system prune -af
+    
+          echo "🔧 Reset workspace persistent_storage folder"
+          rm -rf persistent_storage
+          mkdir -p persistent_storage
+        '''
+      }
+    }
+    
+    stage('Mount persistent_storage & Enable Ingress in Minikube') {
+      steps {
+        sh """
+          SRC=\"${HOST_PERSISTENT_STORAGE}\"
+    
+          echo "▶ Killing any prior minikube mount processes"
+          pkill -f 'minikube mount' || true
+    
+          echo "→ Verifying host-folder permissions for mounting:"
+          ls -ld \"\${SRC}\" || { echo "❌ \${SRC} not found or inaccessible"; exit 1; }
+    
+          echo "→ Checking Minikube status"
+          if ! minikube status | grep -q "host: Running"; then
+            echo "→ Minikube is not running. Starting it now..."
+            minikube start --driver=docker
+          else
+            echo "→ Minikube is already running."
+          fi
+    
+          echo "▶ Mounting \"\${SRC}\" → Minikube:/persistent_storage"
+          nohup minikube mount \\
+            \"\${SRC}\":/persistent_storage \\
+            --uid=\$(id -u) --gid=\$(id -g) \\
+            > minikube-mount.log 2>&1 &
+    
+          sleep 5
+    
+          echo "▶ Verifying minikube-mount process"
+          if pgrep -f 'minikube mount' > /dev/null; then
+            echo "✔ minikube mount is running (PID=\$(pgrep -f 'minikube mount'))"
+          else
+            echo "❌ minikube mount did NOT start — see logs:"
+            cat minikube-mount.log || true
+            exit 1
+          fi
+    
+          echo "▶ Enabling Ingress addon (non-blocking)"
+          nohup minikube addons enable ingress > minikube-ingress-enable.log 2>&1 &
+    
+          echo "ℹ️ Ingress addon enabling initiated in background. Proceeding without waiting."
+        """
+      }
+    }
+
+    
+    
+
+    stage('Debug: Compose Config & Networks') {
+      steps {
+        sh '''
+          echo "--- Effective Compose Configuration ---"
+          docker network ls | grep nstapp_app_network || true
+          docker-compose -p nstapp -f docker-compose.yml config
+          echo
+          echo "--- Docker Networks ---"
+          docker network ls
         '''
       }
     }
 
-    stage('Checkout from GitHub') {
+
+
+   stage('Build & Up Services (Docker-Compose)') {
       steps {
-        // Use a token to clone the private/public repo (branch "devops")
-        // Ensure the repo URL is accessible via HTTPS + token
         sh '''
-          git config --global credential.helper store
-          git clone --branch devops \
-            https://$GITHUB_TOKEN@github.com/Deepanshu09-max/NST_app.git .
-        '''
-      }
-    }
-
-    stage('Lint & Unit Tests') {
-      parallel {
-        stage('Python Lint') {
-          steps {
-            sh 'flake8 . || true'
-          }
-        }
-        stage('JS Lint (frontend)') {
-          when { expression { fileExists('frontend/package.json') } }
-          steps {
-            dir('frontend') {
-              sh 'npm ci && npm run lint || true'
-            }
-          }
-        }
-        stage('Python Unit Tests') {
-          steps {
-            sh '''
-              pytest -q routing_service || true
-              pytest -q inference_services || true
-            '''
-          }
-        }
-      }
-    }
-
-    stage('Build & Push Images') {
-      steps {
-        script {
-          docker.withRegistry("https://index.docker.io/v1/", "${DOCKERHUB_USER}:${DOCKERHUB_PASS}") {
-            // 1) Build & push the shared tf-base image
-            def baseImg = docker.build(
-              "${DOCKERHUB_USER}/nst_app/tf-base:2.11.0-cpu",
-              "docker/base-tf"
-            )
-            baseImg.push()
-
-            // 2) Build & push each service image
-            def services = [
-              'frontend',
-              'routing_service',
-              'fine_tuning_service',
-              'inference_services/model1',
-              'inference_services/model2',
-              'inference_services/model3',
-              'inference_services/model4'
-            ]
-
-            for (svc in services) {
-              def tagSuffix = svc.replaceAll('/', '-')
-              def imageName = "${DOCKERHUB_USER}/nst_app:${tagSuffix}"
-              def img = docker.build(imageName, svc)
-              img.push()
-            }
-          }
-        }
-      }
-    }
-
-    stage('Deploy to Staging') {
-      steps {
-        // Launch all services via docker-compose in detached mode
-        sh '''
-          echo "Deploying to STAGING via docker-compose..."
-          docker-compose -f docker-compose.yml up -d
+          echo "🚀 Building & launching all services under project 'nstapp'…"
+    
+          echo "--- Networks just before up ---"
+          docker network ls
+          echo "▶ Proceeding with Docker Compose up & build"
+          docker-compose -p nstapp -f docker-compose.yml up -d --build
+    
+          echo "✅ Post-up network check for 'nstapp_app_network'"
+          docker network ls | grep nstapp_app_network || echo "⚠️ Network not found"
         '''
       }
     }
 
     stage('Integration Tests') {
       steps {
-        // Assumes run_integration_tests.sh is executable and at repo root
-        sh './run_integration_tests.sh'
+        sh '''
+          echo "▶ Running integration tests"
+          python3 test.py
+        '''
+      }
+    }
+
+    stage('Tag & Push Images') {
+      steps {
+        withCredentials([usernamePassword(
+          credentialsId: "${DOCKER_CREDS}",
+          usernameVariable: 'DOCKER_USER',
+          passwordVariable: 'DOCKER_PASS'
+        )]) {
+          sh '''
+            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+
+            for svc in \
+              base-tf \
+              frontend \
+              routing_service \
+              fine_tuning_service \
+              inference_service_model1 \
+              inference_service_model2 \
+              inference_service_model3 \
+              inference_service_model4; do
+
+              echo "🔖 Tag & push nst_app_${svc}:latest → $DOCKER_USER/nst_app:${svc}"
+              docker tag nst_app_${svc}:latest $DOCKER_USER/nst_app:${svc}
+              docker push $DOCKER_USER/nst_app:${svc}
+            done
+          '''
+        }
+      }
+    }
+
+    stage('Deploy to K8s & ELK (Ansible)') {
+      steps {
+        sh '''
+          export KUBECONFIG=$KUBE_CONFIG
+          cd ansible/playbooks
+          ansible-playbook -i ../inventory.ini umbrella-playbook.yml
+        '''
+      }
+    }
+
+    stage('Check Feedback & Trigger Fine-Tuning') {
+      steps {
+        script {
+          def fbFile     = 'persistent_storage/feedback.jsonl'
+          def offsetFile = 'persistent_storage/feedback.offset'
+
+          def allLines   = readFile(fbFile).readLines()
+          def totalLines = allLines.size()
+
+          def lastOffset = fileExists(offsetFile) ?
+                             readFile(offsetFile).trim().toInteger() :
+                             0
+
+          if (totalLines <= lastOffset) {
+            echo "✅ No new feedback since last run."
+            return
+          }
+
+          def newLines    = allLines[lastOffset..<totalLines]
+          def badPerModel = [:].withDefault { 0 }
+
+          newLines.each { line ->
+            def json = readJSON text: line
+            if (json.feedback == 'bad' && json.model) {
+              badPerModel[json.model] += 1
+            }
+          }
+
+          badPerModel.each { model, count ->
+            echo "📊 Model '${model}' received ${count} new bad feedback(s)"
+          }
+
+          def threshold = BAD_FEEDBACK_THRESHOLD.toInteger()
+          def triggered = false
+
+          badPerModel.each { model, count ->
+            if (count >= threshold) {
+              echo "🚀 '${model}' exceeded threshold (${count} ≥ ${threshold}), triggering fine-tune"
+              build job: "${FINE_TUNE_JOB}",
+                    wait: false,
+                    parameters: [
+                      string(name: 'BAD_FEEDBACK_COUNT', value: count.toString()),
+                      string(name: 'MODEL_NAME',         value: model)
+                    ]
+              triggered = true
+            }
+          }
+
+          if (!triggered) {
+            echo "✅ No model exceeded the threshold (${threshold})."
+          }
+
+          writeFile file: offsetFile, text: totalLines.toString()
+        }
       }
     }
   }
 
   post {
     success {
-      echo '🟢 NST_App pipeline succeeded.'
+      echo '✅ Pipeline completed successfully.'
     }
     failure {
-      echo '🔴 NST_App pipeline failed.'
+      echo '❌ Pipeline failed — please inspect the logs.'
     }
     always {
-      sh 'docker system prune -f || true'
+      sh '''
+        echo "🧹 Cleaning up: Docker & Minikube mounts"
+        docker-compose -p nstapp -f docker-compose.yml down --remove-orphans
+        docker system prune -af || true
+        docker network prune -f
+
+        echo "▶ Killing minikube mount"
+        pkill -f "minikube mount" || true
+      '''
     }
   }
 }

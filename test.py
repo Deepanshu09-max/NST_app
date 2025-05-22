@@ -6,7 +6,7 @@ import sys
 import shutil # For file operations if needed by services, not directly by tests here
 
 # --- Configuration ---
-BASE_URL_FRONTEND = "http://localhost:8080"
+BASE_URL_FRONTEND = "http://localhost:80"
 BASE_URL_ROUTING = "http://localhost:8000"
 BASE_URL_INFERENCE_MODEL1 = "http://localhost:8001"
 BASE_URL_INFERENCE_MODEL2 = "http://localhost:8002"
@@ -225,7 +225,7 @@ if __name__ == "__main__":
 
     # Allow some time for services to fully initialize after docker-compose up
     # Adjust this based on your system and service startup times
-    initial_wait_time = 20
+    initial_wait_time = 10
     print(f"\nWaiting for {initial_wait_time} seconds for services to initialize...")
     time.sleep(initial_wait_time)
 
