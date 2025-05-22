@@ -54,7 +54,7 @@ pipeline {
           docker-compose -p nstapp down -v --remove-orphans || true
           docker system prune -af       || true
           docker network prune -f       || true
-          docker network rm nstapp_app_network || true
+
           echo "🔧 Resetting host persistent_storage"
           rm -rf persistent_storage
           mkdir -p persistent_storage
@@ -80,65 +80,28 @@ pipeline {
         """
       }
     }
-
-
-    stage('Build & Up Services (Docker-Compose)') {
+    
+    stage('Mount persistent_storage into Minikube') {
       steps {
-        sh '''
-          echo "🚀 Building & launching all services under project 'nstapp'…"
-          docker-compose -p nstapp -f docker-compose.yml up -d --build
-        '''
+        sh """
+          echo "▶ Killing any prior minikube mount processes"
+          pkill -f 'minikube mount' || true
+    
+          echo "▶ Mounting ${HOST_PERSISTENT_STORAGE} → Minikube:/persistent_storage"
+          nohup minikube mount \
+            \"${HOST_PERSISTENT_STORAGE}\":/persistent_storage \
+            --uid=\$(id -u) --gid=\$(id -g) \
+            > minikube-mount.log 2>&1 &
+    
+          sleep 5
+          echo "▶ minikube‑mount log (tail 20):"
+          tail -n 20 minikube-mount.log
+    
+          echo "▶ minikube-mount PID=$(pgrep -f 'minikube mount')"
+        """
       }
     }
 
-    stage('Integration Tests') {
-      steps {
-        sh '''
-          echo "▶ Running integration tests"
-          chmod +x testing.sh
-          ./testing.sh
-        '''
-      }
-    }
-
-    stage('Tag & Push Images') {
-      steps {
-        withCredentials([usernamePassword(
-          credentialsId: "${DOCKER_CREDS}",
-          usernameVariable: 'DOCKER_USER',
-          passwordVariable: 'DOCKER_PASS'
-        )]) {
-          sh '''
-            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-
-            for svc in \
-              base-tf \
-              frontend \
-              routing_service \
-              fine_tuning_service \
-              inference_service_model1 \
-              inference_service_model2 \
-              inference_service_model3 \
-              inference_service_model4; do
-
-              echo "🔖 Tag & push nst_app_${svc}:latest → $DOCKER_USER/nst_app:${svc}"
-              docker tag nst_app_${svc}:latest $DOCKER_USER/nst_app:${svc}
-              docker push $DOCKER_USER/nst_app:${svc}
-            done
-          '''
-        }
-      }
-    }
-
-    stage('Deploy to K8s & ELK (Ansible)') {
-      steps {
-        sh '''
-          export KUBECONFIG=$KUBE_CONFIG
-          cd ansible/playbooks
-          ansible-playbook -i ../inventory.ini umbrella-playbook.yml
-        '''
-      }
-    }
 
     stage('Check Feedback & Trigger Fine-Tuning') {
       steps {
@@ -146,18 +109,29 @@ pipeline {
           def fbFile     = 'persistent_storage/feedback.jsonl'
           def offsetFile = 'persistent_storage/feedback.offset'
 
+          // ───────────────────────────────────────────────────────────────────────────
+          // 1) Make sure the feedback file actually exists. Otherwise readFile will blow up.
+          // ───────────────────────────────────────────────────────────────────────────
+          if (!fileExists(fbFile)) {
+            echo "⚠️  No feedback file found at '${fbFile}'. Skipping fine-tune trigger."
+            return
+          }
+
+          // Read all lines and count
           def allLines   = readFile(fbFile).readLines()
           def totalLines = allLines.size()
 
+          // If offset file missing, assume zero
           def lastOffset = fileExists(offsetFile) ?
                              readFile(offsetFile).trim().toInteger() :
                              0
 
           if (totalLines <= lastOffset) {
-            echo "✅ No new feedback since last run."
+            echo "✅ No new feedback since last run. (lines: ${totalLines}, offset: ${lastOffset})"
             return
           }
 
+          // Only process the “new” lines
           def newLines    = allLines[lastOffset..<totalLines]
           def badPerModel = [:].withDefault { 0 }
 
@@ -181,6 +155,12 @@ pipeline {
               build job: "${FINE_TUNE_JOB}",
                     wait: false,
                     parameters: [
+                      // ─────────────────────────────────────────────────────────────────
+                      // 2) The Fine-Tune job expects a parameter named TRIGGERED_BY,
+                      //    but here we only passed MODEL_NAME and BAD_FEEDBACK_COUNT….
+                      //    If you actually want to see “who triggered it,” pass BUILD_NUMBER too.
+                      // ─────────────────────────────────────────────────────────────────
+                      string(name: 'TRIGGERED_BY',       value: env.BUILD_NUMBER),
                       string(name: 'BAD_FEEDBACK_COUNT', value: count.toString()),
                       string(name: 'MODEL_NAME',         value: model)
                     ]
@@ -192,6 +172,7 @@ pipeline {
             echo "✅ No model exceeded the threshold (${threshold})."
           }
 
+          // Always write the new offset back
           writeFile file: offsetFile, text: totalLines.toString()
         }
       }

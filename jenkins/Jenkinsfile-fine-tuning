@@ -1,24 +1,22 @@
 pipeline {
   agent any
 
+  // these are the parameters the main pipeline will supply
   parameters {
-    string(name: 'TRIGGERED_BY',       defaultValue: '',       description: 'Build number that triggered this')
-    string(name: 'MODEL_NAME',         defaultValue: 'model4', description: 'Which model to fine‑tune')
-    string(name: 'EPOCHS',             defaultValue: '2',      description: 'Number of epochs')
-    string(name: 'BATCH_SIZE',         defaultValue: '2',      description: 'Batch size')
-    string(name: 'IMAGE_SIZE',         defaultValue: '256',    description: 'Image size')
-    string(name: 'LEARNING_RATE',      defaultValue: '0.001',  description: 'Learning rate')
-    string(name: 'STYLE_WEIGHT',       defaultValue: '1e5',    description: 'Style loss weight')
-    string(name: 'CONTENT_WEIGHT',     defaultValue: '1.0',    description: 'Content loss weight')
-    string(name: 'SERVICE_URL',        defaultValue: 'http://localhost:8005/finetune',
-                                                    description: 'Fine‑tune service endpoint')
-    booleanParam(name: 'RETRIGGER_MAIN', defaultValue: true,      description: 'Re‑trigger NST_App on success?')
-  }
-
-  environment {
-    GIT_CREDENTIALS_ID     = 'github-creds'
-    GIT_REPO               = 'git@github.com:your-org/your-repo.git'
-    NST_APP_JOB_NAME       = 'NST_App'
+    string(name: 'TRIGGERED_BY',        defaultValue: '',       description: 'Main pipeline build that triggered this')
+    string(name: 'MODEL_NAME',          defaultValue: 'model1', description: 'Which model to fine-tune')
+    string(name: 'BAD_FEEDBACK_COUNT',  defaultValue: '0',      description: 'How many new bad feedbacks')
+    // you can also expose epochs, lr, etc. if you want to override:
+    string(name: 'EPOCHS',              defaultValue: '2',      description: 'Epochs for fine-tune')
+    string(name: 'BATCH_SIZE',          defaultValue: '2',      description: 'Batch size')
+    string(name: 'IMAGE_SIZE',          defaultValue: '256',    description: 'Image size')
+    string(name: 'LEARNING_RATE',       defaultValue: '0.001',  description: 'Learning rate')
+    string(name: 'STYLE_WEIGHT',        defaultValue: '100000', description: 'Style loss weight')
+    string(name: 'CONTENT_WEIGHT',      defaultValue: '1.0',    description: 'Content loss weight')
+    string(name: 'SERVICE_URL',
+           defaultValue: 'http://localhost:8005/finetune',
+           description: 'Fine-tune microservice endpoint')
+    booleanParam(name: 'RETRIGGER_MAIN', defaultValue: true,     description: 'Re-trigger NST_App on success?')
   }
 
   options {
@@ -28,34 +26,24 @@ pipeline {
   }
 
   stages {
-    stage('Checkout') {
-      steps {
-        git branch: 'main',
-            credentialsId: env.GIT_CREDENTIALS_ID,
-            url:          env.GIT_REPO
-      }
-    }
-
-    stage('Trigger Fine‑Tuning Service') {
+    stage('Trigger Fine-Tuning Service') {
       steps {
         script {
-          def payload = """
-          {
-            "model_name": "${params.MODEL_NAME}",
-            "epochs": ${params.EPOCHS},
-            "batch_size": ${params.BATCH_SIZE},
-            "image_size": ${params.IMAGE_SIZE},
-            "lr": ${params.LEARNING_RATE},
-            "style_weight": ${params.STYLE_WEIGHT},
-            "content_weight": ${params.CONTENT_WEIGHT}
-          }
-          """.trim()
-
-          echo "➡️  Sending fine‑tune request to ${params.SERVICE_URL}"
+          // build the JSON payload
+          def payload = [
+            model_name:    params.MODEL_NAME,
+            epochs:        params.EPOCHS as Integer,
+            batch_size:    params.BATCH_SIZE as Integer,
+            image_size:    params.IMAGE_SIZE as Integer,
+            lr:            params.LEARNING_RATE as Double,
+            style_weight:  params.STYLE_WEIGHT as Double,
+            content_weight:params.CONTENT_WEIGHT as Double
+          ]
+          echo "➡️  Sending fine-tune request for '${params.MODEL_NAME}'"
           sh """
-            curl -X POST ${params.SERVICE_URL} \\
+            curl --fail -X POST ${params.SERVICE_URL} \\
                  -H 'Content-Type: application/json' \\
-                 -d '${payload}'
+                 -d '${groovy.json.JsonOutput.toJson(payload)}'
           """
         }
       }
@@ -63,35 +51,36 @@ pipeline {
 
     stage('Publish Trigger Info') {
       steps {
-        echo "✅ Requested fine‑tuning for `${params.MODEL_NAME}` (triggered by #${params.TRIGGERED_BY})."
+        echo "✅ Fine-tune triggered for '${params.MODEL_NAME}'"
+        echo "   • bad feedbacks: ${params.BAD_FEEDBACK_COUNT}"
+        echo "   • triggered by build #${params.TRIGGERED_BY}"
       }
     }
   }
 
   post {
     success {
-      echo "🏆 FineTuneModels succeeded (build #${env.BUILD_NUMBER})."
-
+      echo "🏆 NST_Fine_Tune_Job succeeded (build #${env.BUILD_NUMBER})."
       script {
         if (params.RETRIGGER_MAIN) {
-          echo "🔁 Re‑triggering main pipeline: ${env.NST_APP_JOB_NAME}"
-          build job: env.NST_APP_JOB_NAME,
+          echo "🔁 Re-triggering main pipeline: NST_App"
+          build job: 'NST_App',
                 parameters: [
                   string(name: 'TRIGGERED_BY_FINE_TUNE', value: env.BUILD_NUMBER)
                 ],
-                wait: false,
+                wait:     false,
                 propagate: false,
                 quietPeriod: 30
         }
       }
     }
     failure {
-      mail to: 'you@example.com',
-           subject: "💥 FineTuneModels failed (#${env.BUILD_NUMBER})",
-           body: "Check logs: ${env.BUILD_URL}"
+      mail to:      'you@example.com',
+           subject: "💥 Fine-tuning failed (#${env.BUILD_NUMBER})",
+           body:    "Pipeline logs: ${env.BUILD_URL}"
     }
     always {
-      echo "🏁 FineTuneModels pipeline done."
+      echo "🏁 NST_Fine_Tune_Job complete."
     }
   }
 }
