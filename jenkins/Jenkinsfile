@@ -8,7 +8,7 @@ pipeline {
     KUBECONFIG_CRED         = 'minikube-kubeconfig'
     FINE_TUNE_JOB           = 'NST_Fine_Tune_Job'
     BAD_FEEDBACK_THRESHOLD  = 5
-    HOST_PERSISTENT_STORAGE = '/home/jenkins/workspace/NST-app/persistent_storage'
+    HOST_PERSISTENT_STORAGE = '/home/deepanshu/Documents/SPE Major/NST_app/persistent_storage'
   }
 
   options {
@@ -46,47 +46,134 @@ pipeline {
         git branch: "${GIT_BRANCH}", url: "${GITHUB_REPO_URL}"
       }
     }
-
-    stage('Pre-Compose Cleanup & Prepare Host Dir') {
+    stage('Wipe Conflicting Containers') {
       steps {
         sh '''
-          echo "🧹 Cleaning up old compose state…"
-          docker-compose -p nstapp down -v --remove-orphans || true
-          docker system prune -af       || true
-          docker network prune -f       || true
-          docker network rm nstapp_app_network || true
-          echo "🔧 Resetting host persistent_storage"
+          echo "--- Checking for containers publishing your ports ---"
+          docker ps --format '{{.ID}} {{.Names}} {{.Ports}}' \
+            | grep -E '8080->|800[0-5]->' || echo "👍 No conflicts found"
+    
+          echo "--- Removing any conflicting containers ---"
+          # Find any container bound to 80,8000–8005
+          docker ps -q --filter "publish=80" \
+            --filter "publish=8000" \
+            --filter "publish=8001" \
+            --filter "publish=8002" \
+            --filter "publish=8003" \
+            --filter "publish=8004" \
+            --filter "publish=8005" \
+          | xargs --no-run-if-empty docker rm -f
+    
+          echo "--- Done cleaning up port-binding containers ---"
+        '''
+      }
+    }
+    stage('Pre-Compose Cleanup') {
+      steps {
+        sh '''
+          echo "🧹 Tear down any old compose stacks (both named & default)…"
+          # Named (project = nstapp)
+          docker-compose -p nstapp -f docker-compose.yml down -v --remove-orphans || true
+          # Default (project = working-dir basename)
+          docker-compose          -f docker-compose.yml down -v --remove-orphans || true
+    
+          echo "🧹 Remove stray containers by name prefix"
+          docker ps -a --filter "name=^/nstapp_" -q \
+            | xargs --no-run-if-empty docker rm -f
+    
+          echo "🧹 Kill anything still listening on port 8080"
+          # If it's a Docker container: remove it
+          docker ps -q --filter publish=8080 \
+            | xargs --no-run-if-empty docker rm -f
+          # If it's any process: kill it
+          lsof -i :8080 -t \
+            | xargs --no-run-if-empty kill -9
+    
+          echo "🧹 Prune unused images, networks, volumes"
+          docker network prune -f
+          docker system prune -af
+    
+          echo "🔧 Reset workspace persistent_storage folder"
           rm -rf persistent_storage
           mkdir -p persistent_storage
         '''
       }
     }
-
-    stage('Mount persistent_storage into Minikube') {
+    
+    stage('Mount persistent_storage & Enable Ingress in Minikube') {
       steps {
-        // **Use """…""" so ${HOST_PERSISTENT_STORAGE} is expanded by Groovy before sh runs**
         sh """
+          SRC=\"${HOST_PERSISTENT_STORAGE}\"
+    
           echo "▶ Killing any prior minikube mount processes"
           pkill -f 'minikube mount' || true
-
-          echo "▶ Mounting ${HOST_PERSISTENT_STORAGE} → Minikube:/persistent_storage"
-          nohup minikube mount \
-            \"${HOST_PERSISTENT_STORAGE}\":/persistent_storage \
-            --uid=\$(id -u) --gid=\$(id -g) \
+    
+          echo "→ Verifying host-folder permissions for mounting:"
+          ls -ld \"\${SRC}\" || { echo "❌ \${SRC} not found or inaccessible"; exit 1; }
+    
+          echo "→ Checking Minikube status"
+          if ! minikube status | grep -q "host: Running"; then
+            echo "→ Minikube is not running. Starting it now..."
+            minikube start --driver=docker
+          else
+            echo "→ Minikube is already running."
+          fi
+    
+          echo "▶ Mounting \"\${SRC}\" → Minikube:/persistent_storage"
+          nohup minikube mount \\
+            \"\${SRC}\":/persistent_storage \\
+            --uid=\$(id -u) --gid=\$(id -g) \\
             > minikube-mount.log 2>&1 &
-
+    
           sleep 5
-          echo "▶ minikube-mount PID=\$(pgrep -f 'minikube mount')"
+    
+          echo "▶ Verifying minikube-mount process"
+          if pgrep -f 'minikube mount' > /dev/null; then
+            echo "✔ minikube mount is running (PID=\$(pgrep -f 'minikube mount'))"
+          else
+            echo "❌ minikube mount did NOT start — see logs:"
+            cat minikube-mount.log || true
+            exit 1
+          fi
+    
+          echo "▶ Enabling Ingress addon (non-blocking)"
+          nohup minikube addons enable ingress > minikube-ingress-enable.log 2>&1 &
+    
+          echo "ℹ️ Ingress addon enabling initiated in background. Proceeding without waiting."
         """
       }
     }
 
+    
+    
 
-    stage('Build & Up Services (Docker-Compose)') {
+    stage('Debug: Compose Config & Networks') {
+      steps {
+        sh '''
+          echo "--- Effective Compose Configuration ---"
+          docker network ls | grep nstapp_app_network || true
+          docker-compose -p nstapp -f docker-compose.yml config
+          echo
+          echo "--- Docker Networks ---"
+          docker network ls
+        '''
+      }
+    }
+
+
+
+   stage('Build & Up Services (Docker-Compose)') {
       steps {
         sh '''
           echo "🚀 Building & launching all services under project 'nstapp'…"
+    
+          echo "--- Networks just before up ---"
+          docker network ls
+          echo "▶ Proceeding with Docker Compose up & build"
           docker-compose -p nstapp -f docker-compose.yml up -d --build
+    
+          echo "✅ Post-up network check for 'nstapp_app_network'"
+          docker network ls | grep nstapp_app_network || echo "⚠️ Network not found"
         '''
       }
     }
@@ -95,8 +182,7 @@ pipeline {
       steps {
         sh '''
           echo "▶ Running integration tests"
-          chmod +x testing.sh
-          ./testing.sh
+          python3 test.py
         '''
       }
     }

@@ -225,7 +225,7 @@ if __name__ == "__main__":
 
     # Allow some time for services to fully initialize after docker-compose up
     # Adjust this based on your system and service startup times
-    initial_wait_time = 20
+    initial_wait_time = 10
     print(f"\nWaiting for {initial_wait_time} seconds for services to initialize...")
     time.sleep(initial_wait_time)
 
