@@ -18,6 +18,7 @@ services:
     image: deepanshu0903/nst_app:frontend
     depends_on:
       - tf_base
+      - routing_service
     ports:
       - "8080:80"
     networks:

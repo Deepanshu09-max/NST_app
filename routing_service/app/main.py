@@ -95,13 +95,13 @@ async def stylize(
 
         # Route to inference service - Use service names for Docker/K8s compatibility
         if model == "model1":
-            url = "http://inference-service-model1:8000/infer"
+            url = "http://inference_service_model1:8000/infer"
         elif model == "model2":
-            url = "http://inference-service-model2:8000/infer"
+            url = "http://inference_service_model2:8000/infer"
         elif model == "model3":
-            url = "http://inference-service-model3:8000/infer"
+            url = "http://inference_service_model3:8000/infer"
         elif model == "model4":
-            url = "http://inference-service-model4:8000/infer"
+            url = "http://inference_service_model4:8000/infer"
         else:
             logging.error(f"Invalid model specified: {model}")
             raise HTTPException(status_code=400, detail="Invalid model specified")
