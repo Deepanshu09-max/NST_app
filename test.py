@@ -6,7 +6,7 @@ import sys
 import shutil # For file operations if needed by services, not directly by tests here
 
 # --- Configuration ---
-BASE_URL_FRONTEND = "http://localhost:8080"
+BASE_URL_FRONTEND = "http://localhost:80"
 BASE_URL_ROUTING = "http://localhost:8000"
 BASE_URL_INFERENCE_MODEL1 = "http://localhost:8001"
 BASE_URL_INFERENCE_MODEL2 = "http://localhost:8002"
