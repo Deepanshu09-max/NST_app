@@ -1,85 +1,86 @@
 pipeline {
   agent any
 
+  // these are the parameters the main pipeline will supply
   parameters {
-    string(name: 'TRIGGERED_BY', defaultValue: '', description: 'Build number that triggered this')
-  }
-
-  environment {
-    // Docker & Git
-    DOCKER_REGISTRY       = 'docker.io'
-    DOCKER_CREDENTIALS_ID = 'dockerhub-creds'
-    IMAGE_NAMESPACE       = 'deepanshu0903/nst_app'
-
-    // Paths
-    MODEL_OUTPUT_DIR      = 'persistent_storage/models'
-    TRAINER_DIR           = 'fine_tuning_service'
-    TRAINER_IMAGE_TAG     = 'model-trainer:latest'
+    string(name: 'TRIGGERED_BY',        defaultValue: '',       description: 'Main pipeline build that triggered this')
+    string(name: 'MODEL_NAME',          defaultValue: 'model1', description: 'Which model to fine-tune')
+    string(name: 'BAD_FEEDBACK_COUNT',  defaultValue: '0',      description: 'How many new bad feedbacks')
+    // you can also expose epochs, lr, etc. if you want to override:
+    string(name: 'EPOCHS',              defaultValue: '2',      description: 'Epochs for fine-tune')
+    string(name: 'BATCH_SIZE',          defaultValue: '2',      description: 'Batch size')
+    string(name: 'IMAGE_SIZE',          defaultValue: '256',    description: 'Image size')
+    string(name: 'LEARNING_RATE',       defaultValue: '0.001',  description: 'Learning rate')
+    string(name: 'STYLE_WEIGHT',        defaultValue: '100000', description: 'Style loss weight')
+    string(name: 'CONTENT_WEIGHT',      defaultValue: '1.0',    description: 'Content loss weight')
+    string(name: 'SERVICE_URL',
+           defaultValue: 'http://localhost:8005/finetune',
+           description: 'Fine-tune microservice endpoint')
+    booleanParam(name: 'RETRIGGER_MAIN', defaultValue: true,     description: 'Re-trigger NST_App on success?')
   }
 
   options {
     timestamps()
-    timeout(time: 6, unit: 'HOURS')   // don’t let it run forever
+    timeout(time: 6, unit: 'HOURS')
     buildDiscarder(logRotator(numToKeepStr: '5'))
   }
 
   stages {
-    stage('Checkout') {
+    stage('Trigger Fine-Tuning Service') {
       steps {
-        git branch: 'main',
-            credentialsId: "${env.GIT_CREDENTIALS_ID}",
-            url: "${env.GIT_REPO}"
-      }
-    }
-
-    stage('Build Trainer Image') {
-      steps {
-        dir(TRAINER_DIR) {
-          script {
-            docker.withRegistry("https://${env.DOCKER_REGISTRY}", env.DOCKER_CREDENTIALS_ID) {
-              def img = docker.build("${env.IMAGE_NAMESPACE}:${TRAINER_IMAGE_TAG}", ".")
-              img.push()
-            }
-          }
+        script {
+          // build the JSON payload
+          def payload = [
+            model_name:    params.MODEL_NAME,
+            epochs:        params.EPOCHS as Integer,
+            batch_size:    params.BATCH_SIZE as Integer,
+            image_size:    params.IMAGE_SIZE as Integer,
+            lr:            params.LEARNING_RATE as Double,
+            style_weight:  params.STYLE_WEIGHT as Double,
+            content_weight:params.CONTENT_WEIGHT as Double
+          ]
+          echo "➡️  Sending fine-tune request for '${params.MODEL_NAME}'"
+          sh """
+            curl --fail -X POST ${params.SERVICE_URL} \\
+                 -H 'Content-Type: application/json' \\
+                 -d '${groovy.json.JsonOutput.toJson(payload)}'
+          """
         }
       }
     }
 
-    stage('Run Training') {
+    stage('Publish Trigger Info') {
       steps {
-        sh """
-          docker run --rm \
-            -v \$(pwd)/${MODEL_OUTPUT_DIR}:/models \
-            ${env.IMAGE_NAMESPACE}:${TRAINER_IMAGE_TAG} \
-            python fine_tune.py --output-dir /models
-        """
-      }
-    }
-
-    stage('Publish New Model') {
-      steps {
-        echo "✅ New models should now be in ${MODEL_OUTPUT_DIR} (shared PVC)."
-        // Optionally tag & push inference-service image with updated model
-        // or trigger a rollout via kubectl:
-        sh '''
-          # e.g. roll your deployments to pick up new PVC-mounted models
-          kubectl rollout restart deployment/inference-service-model1
-          kubectl rollout restart deployment/inference-service-model2
-          kubectl rollout restart deployment/inference-service-model3
-          kubectl rollout restart deployment/inference-service-model4
-        '''
+        echo "✅ Fine-tune triggered for '${params.MODEL_NAME}'"
+        echo "   • bad feedbacks: ${params.BAD_FEEDBACK_COUNT}"
+        echo "   • triggered by build #${params.TRIGGERED_BY}"
       }
     }
   }
 
   post {
     success {
-      echo "🏆 FineTuneModels pipeline completed (triggered by #${params.TRIGGERED_BY})."
+      echo "🏆 NST_Fine_Tune_Job succeeded (build #${env.BUILD_NUMBER})."
+      script {
+        if (params.RETRIGGER_MAIN) {
+          echo "🔁 Re-triggering main pipeline: NST_App"
+          build job: 'NST_App',
+                parameters: [
+                  string(name: 'TRIGGERED_BY_FINE_TUNE', value: env.BUILD_NUMBER)
+                ],
+                wait:     false,
+                propagate: false,
+                quietPeriod: 30
+        }
+      }
     }
     failure {
-      mail to: 'you@example.com',
-           subject: "💥 Fine‐tune failed (#${BUILD_NUMBER})",
-           body: "Check console output: ${env.BUILD_URL}"
+      mail to:      'you@example.com',
+           subject: "💥 Fine-tuning failed (#${env.BUILD_NUMBER})",
+           body:    "Pipeline logs: ${env.BUILD_URL}"
+    }
+    always {
+      echo "🏁 NST_Fine_Tune_Job complete."
     }
   }
 }

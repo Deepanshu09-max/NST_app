@@ -19,7 +19,7 @@ services:
     depends_on:
       - tf_base
     ports:
-      - "8080:80"
+      - "80:80"
     networks:
       - app_network
 

@@ -1,0 +1,201 @@
+pipeline {
+  agent any
+
+  environment {
+    GITHUB_REPO_URL         = 'https://github.com/Deepanshu09-max/NST_app.git'
+    GIT_BRANCH              = 'devops'
+    DOCKER_CREDS            = 'dockerhub-credentials'
+    KUBECONFIG_CRED         = 'minikube-kubeconfig'
+    FINE_TUNE_JOB           = 'NST_Fine_Tune_Job'
+    BAD_FEEDBACK_THRESHOLD  = 5
+    HOST_PERSISTENT_STORAGE = '/home/jenkins/workspace/NST-app/persistent_storage'
+  }
+
+  options {
+    timestamps()
+    buildDiscarder(logRotator(numToKeepStr: '10'))
+  }
+
+  stages {
+    stage('Pre-flight: Docker login & Kubeconfig') {
+      steps {
+        withCredentials([usernamePassword(
+          credentialsId: "${DOCKER_CREDS}",
+          usernameVariable: 'DOCKER_USER',
+          passwordVariable: 'DOCKER_PASS'
+        )]) {
+          sh '''
+            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+          '''
+        }
+        withCredentials([file(
+          credentialsId: "${KUBECONFIG_CRED}",
+          variable: 'KUBE_CONFIG'
+        )]) {
+          sh '''
+            export KUBECONFIG=$KUBE_CONFIG
+            echo "🛠️  Using KUBECONFIG from Jenkins credentials"
+            kubectl version --client
+          '''
+        }
+      }
+    }
+
+    stage('Checkout') {
+      steps {
+        git branch: "${GIT_BRANCH}", url: "${GITHUB_REPO_URL}"
+      }
+    }
+
+    stage('Pre-Compose Cleanup & Prepare Host Dir') {
+      steps {
+        sh '''
+          echo "🧹 Cleaning up old compose state…"
+          docker-compose -p nstapp down -v --remove-orphans || true
+          docker system prune -af       || true
+          docker network prune -f       || true
+
+          echo "🔧 Resetting host persistent_storage"
+          rm -rf persistent_storage
+          mkdir -p persistent_storage
+        '''
+      }
+    }
+
+    stage('Mount persistent_storage into Minikube') {
+      steps {
+        // **Use """…""" so ${HOST_PERSISTENT_STORAGE} is expanded by Groovy before sh runs**
+        sh """
+          echo "▶ Killing any prior minikube mount processes"
+          pkill -f 'minikube mount' || true
+
+          echo "▶ Mounting ${HOST_PERSISTENT_STORAGE} → Minikube:/persistent_storage"
+          nohup minikube mount \
+            \"${HOST_PERSISTENT_STORAGE}\":/persistent_storage \
+            --uid=\$(id -u) --gid=\$(id -g) \
+            > minikube-mount.log 2>&1 &
+
+          sleep 5
+          echo "▶ minikube-mount PID=\$(pgrep -f 'minikube mount')"
+        """
+      }
+    }
+    
+    stage('Mount persistent_storage into Minikube') {
+      steps {
+        sh """
+          echo "▶ Killing any prior minikube mount processes"
+          pkill -f 'minikube mount' || true
+    
+          echo "▶ Mounting ${HOST_PERSISTENT_STORAGE} → Minikube:/persistent_storage"
+          nohup minikube mount \
+            \"${HOST_PERSISTENT_STORAGE}\":/persistent_storage \
+            --uid=\$(id -u) --gid=\$(id -g) \
+            > minikube-mount.log 2>&1 &
+    
+          sleep 5
+          echo "▶ minikube‑mount log (tail 20):"
+          tail -n 20 minikube-mount.log
+    
+          echo "▶ minikube-mount PID=$(pgrep -f 'minikube mount')"
+        """
+      }
+    }
+
+
+    stage('Check Feedback & Trigger Fine-Tuning') {
+      steps {
+        script {
+          def fbFile     = 'persistent_storage/feedback.jsonl'
+          def offsetFile = 'persistent_storage/feedback.offset'
+
+          // ───────────────────────────────────────────────────────────────────────────
+          // 1) Make sure the feedback file actually exists. Otherwise readFile will blow up.
+          // ───────────────────────────────────────────────────────────────────────────
+          if (!fileExists(fbFile)) {
+            echo "⚠️  No feedback file found at '${fbFile}'. Skipping fine-tune trigger."
+            return
+          }
+
+          // Read all lines and count
+          def allLines   = readFile(fbFile).readLines()
+          def totalLines = allLines.size()
+
+          // If offset file missing, assume zero
+          def lastOffset = fileExists(offsetFile) ?
+                             readFile(offsetFile).trim().toInteger() :
+                             0
+
+          if (totalLines <= lastOffset) {
+            echo "✅ No new feedback since last run. (lines: ${totalLines}, offset: ${lastOffset})"
+            return
+          }
+
+          // Only process the “new” lines
+          def newLines    = allLines[lastOffset..<totalLines]
+          def badPerModel = [:].withDefault { 0 }
+
+          newLines.each { line ->
+            def json = readJSON text: line
+            if (json.feedback == 'bad' && json.model) {
+              badPerModel[json.model] += 1
+            }
+          }
+
+          badPerModel.each { model, count ->
+            echo "📊 Model '${model}' received ${count} new bad feedback(s)"
+          }
+
+          def threshold = BAD_FEEDBACK_THRESHOLD.toInteger()
+          def triggered = false
+
+          badPerModel.each { model, count ->
+            if (count >= threshold) {
+              echo "🚀 '${model}' exceeded threshold (${count} ≥ ${threshold}), triggering fine-tune"
+              build job: "${FINE_TUNE_JOB}",
+                    wait: false,
+                    parameters: [
+                      // ─────────────────────────────────────────────────────────────────
+                      // 2) The Fine-Tune job expects a parameter named TRIGGERED_BY,
+                      //    but here we only passed MODEL_NAME and BAD_FEEDBACK_COUNT….
+                      //    If you actually want to see “who triggered it,” pass BUILD_NUMBER too.
+                      // ─────────────────────────────────────────────────────────────────
+                      string(name: 'TRIGGERED_BY',       value: env.BUILD_NUMBER),
+                      string(name: 'BAD_FEEDBACK_COUNT', value: count.toString()),
+                      string(name: 'MODEL_NAME',         value: model)
+                    ]
+              triggered = true
+            }
+          }
+
+          if (!triggered) {
+            echo "✅ No model exceeded the threshold (${threshold})."
+          }
+
+          // Always write the new offset back
+          writeFile file: offsetFile, text: totalLines.toString()
+        }
+      }
+    }
+  }
+
+  post {
+    success {
+      echo '✅ Pipeline completed successfully.'
+    }
+    failure {
+      echo '❌ Pipeline failed — please inspect the logs.'
+    }
+    always {
+      sh '''
+        echo "🧹 Cleaning up: Docker & Minikube mounts"
+        docker-compose -p nstapp -f docker-compose.yml down --remove-orphans
+        docker system prune -af || true
+        docker network prune -f
+
+        echo "▶ Killing minikube mount"
+        pkill -f "minikube mount" || true
+      '''
+    }
+  }
+}
