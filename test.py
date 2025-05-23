@@ -18,7 +18,7 @@ BASE_URL_INFERENCE_MODEL4 = "http://localhost:8004"
 SAMPLE_CONTENT_IMAGE_FILENAME = "sample_content_test.jpg"
 
 # For latest model test (now repurposed for dynamic prefix)
-PERSISTENT_STORAGE_MODELS_HOST_PATH = "/Users/aryanrastogi/college/spe/NST_Major/neural-style-transfer/persistent_storage/models"
+PERSISTENT_STORAGE_MODELS_HOST_PATH = f"{HOST_PERSISTENT_STORAGE}/models"
 LATEST_MODEL_TXT_FILENAME = "latest.txt" # Expects a checkpoint file name like "udnie.ckpt-done"
 
 # --- Helper Functions ---
