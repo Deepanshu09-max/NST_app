@@ -18,6 +18,8 @@ BASE_URL_INFERENCE_MODEL4 = "http://localhost:8004"
 SAMPLE_CONTENT_IMAGE_FILENAME = "sample_content_test.jpg"
 
 # For latest model test (now repurposed for dynamic prefix)
+
+HOST_PERSISTENT_STORAGE = os.environ.get("HOST_PERSISTENT_STORAGE")
 PERSISTENT_STORAGE_MODELS_HOST_PATH = f"{HOST_PERSISTENT_STORAGE}/models"
 LATEST_MODEL_TXT_FILENAME = "latest.txt" # Expects a checkpoint file name like "udnie.ckpt-done"
 
