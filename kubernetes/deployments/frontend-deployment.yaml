@@ -15,6 +15,6 @@ spec:
       containers:
         - name: frontend
           image: deepanshu0903/nst_app:frontend
-          imagePullPolicy: IfNotPresent  
+          imagePullPolicy: Never  
           ports:
             - containerPort: 80

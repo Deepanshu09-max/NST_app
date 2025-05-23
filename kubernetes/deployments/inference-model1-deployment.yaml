@@ -15,7 +15,7 @@ spec:
       containers:
         - name: inference-service-model1
           image: deepanshu0903/nst_app:inference_service_model1
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Never
           ports:
             - containerPort: 8000
           volumeMounts:
