@@ -234,60 +234,140 @@ pipeline {
     stage('Check Feedback & Trigger Fine-Tuning') {
       steps {
         script {
-          def fbFile     = 'persistent_storage/feedback.jsonl'
-          def offsetFile = 'persistent_storage/feedback.offset'
-
-          def allLines   = readFile(fbFile).readLines()
-          def totalLines = allLines.size()
-
-          def lastOffset = fileExists(offsetFile) ?
-                             readFile(offsetFile).trim().toInteger() :
-                             0
-
-          if (totalLines <= lastOffset) {
-            echo "✅ No new feedback since last run."
+          // Paths to files
+          def fbFile     = "${env.HOST_PERSISTENT_STORAGE}/feedback.jsonl"
+          def offsetFile = "${env.HOST_PERSISTENT_STORAGE}/feedback.offset"
+          def countsFile = "${env.HOST_PERSISTENT_STORAGE}/feedback.counts.json"
+    
+          // 1) Verify feedback.jsonl exists
+          echo "🔍 [DEBUG] Looking for feedback file at: ${fbFile}"
+          if (!fileExists(fbFile)) {
+            echo "ℹ️  No feedback file found at '${fbFile}' → skipping fine-tune check."
             return
           }
-
-          def newLines    = allLines[lastOffset..<totalLines]
-          def badPerModel = [:].withDefault { 0 }
-
-          newLines.each { line ->
-            def json = readJSON text: line
-            if (json.feedback == 'bad' && json.model) {
-              badPerModel[json.model] += 1
+    
+          // 2) Read all lines from feedback.jsonl
+          def allLines = []
+          try {
+            allLines = readFile(fbFile).readLines()
+          } catch (err) {
+            echo "❌  Failed to read '${fbFile}': ${err.getMessage()}"
+            return
+          }
+          def totalLines = allLines.size()
+          echo "🔍 [DEBUG] totalLines = ${totalLines}"
+    
+          // 3) Determine last offset (default to 0 if missing/invalid)
+          int offsetValue = 0
+          if (fileExists(offsetFile)) {
+            try {
+              offsetValue = readFile(offsetFile).trim().toInteger()
+              echo "🔍 [DEBUG] Parsed offsetValue = ${offsetValue}"
+            } catch (Exception e) {
+              echo "⚠️  Invalid offset in '${offsetFile}'; resetting to 0."
+              offsetValue = 0
+            }
+          } else {
+            echo "🔍 [DEBUG] No offset file at '${offsetFile}'; defaulting offsetValue = 0"
+          }
+    
+          // Reset offset if larger than total
+          if (offsetValue > totalLines) {
+            echo "⚠️  offsetValue (${offsetValue}) > totalLines (${totalLines}); resetting offset → 0"
+            offsetValue = 0
+          }
+    
+          // 4) If no new lines, update offset and exit
+          if (totalLines <= offsetValue) {
+            echo "✅  No new feedback (offset=${offsetValue}, totalLines=${totalLines})."
+            writeFile file: offsetFile, text: totalLines.toString()
+            echo "🔍 [DEBUG] Wrote new offset (${totalLines}) to '${offsetFile}'"
+            return
+          }
+    
+          // 5) Compute newLines array
+          def newLines = allLines[offsetValue..<totalLines]
+          echo "ℹ️  Found ${newLines.size()} new line(s) of feedback"
+    
+          // 6) Load existing cumulative “bad” counts
+          def cumulativeCounts = [:]
+          if (fileExists(countsFile)) {
+            try {
+              cumulativeCounts = readJSON file: countsFile
+              echo "🔍 [DEBUG] Loaded cumulativeCounts = ${cumulativeCounts}"
+            } catch (Exception e) {
+              echo "⚠️  Could not parse '${countsFile}'; initializing all counts to 0."
+              cumulativeCounts = [:]
+            }
+          } else {
+            echo "🔍 [DEBUG] No counts file at '${countsFile}'; initializing all counts to 0."
+          }
+    
+          // 7) Count “bad” feedback in newLines per model
+          def newBadCounts = [:]   // plain map
+    
+          newLines.eachWithIndex { line, idx ->
+            def text = line?.trim()
+            if (!text) {
+              echo "⚠️  newLines[${idx}] empty or whitespace, skipping"
+              return
+            }
+            try {
+              echo "🔍 [DEBUG] Parsing JSON on newLines[${idx}]"
+              def json = readJSON text: text
+              echo "🔍 [DEBUG] Parsed: feedback='${json.feedback}', model='${json.model}'"
+              if (json.feedback == 'bad' && json.model) {
+                def prev = newBadCounts.containsKey(json.model) ? newBadCounts[json.model] : 0
+                newBadCounts[json.model] = prev + 1
+              }
+            } catch (Exception e) {
+              echo "❌  JSON parse error on newLines[${idx}]: ${e.toString()}"
             }
           }
-
-          badPerModel.each { model, count ->
-            echo "📊 Model '${model}' received ${count} new bad feedback(s)"
-          }
-
-          def threshold = BAD_FEEDBACK_THRESHOLD.toInteger()
-          def triggered = false
-
-          badPerModel.each { model, count ->
-            if (count >= threshold) {
-              echo "🚀 '${model}' exceeded threshold (${count} ≥ ${threshold}), triggering fine-tune"
-              build job: "${FINE_TUNE_JOB}",
-                    wait: false,
-                    parameters: [
-                      string(name: 'BAD_FEEDBACK_COUNT', value: count.toString()),
-                      string(name: 'MODEL_NAME',         value: model)
-                    ]
-              triggered = true
+    
+          // 8) Merge into cumulativeCounts and decide triggers
+          def threshold = env.BAD_FEEDBACK_THRESHOLD.toInteger()
+          def toTrigger = []
+          newBadCounts.each { model, badThisRun ->
+            def oldCount = cumulativeCounts.containsKey(model) ? (cumulativeCounts[model] as Integer) : 0
+            def updated  = oldCount + badThisRun
+            cumulativeCounts[model] = updated
+            echo "📊  Model='${model}', oldBad=${oldCount}, newBad=${badThisRun}, totalBad=${updated}"
+            if (updated >= threshold) {
+              toTrigger << model
             }
           }
-
-          if (!triggered) {
-            echo "✅ No model exceeded the threshold (${threshold})."
+    
+          // 9) Trigger fine-tune for any model that hit threshold, then reset its count
+          def anyTriggered = false
+          toTrigger.unique().each { model ->
+            echo "▶ Triggering fine-tune for '${model}'"
+            build job: "${FINE_TUNE_JOB}",
+                  wait: false,
+                  parameters: [
+                    string(name: 'BAD_FEEDBACK_COUNT', value: cumulativeCounts[model].toString()),
+                    string(name: 'MODEL_NAME',         value: model)
+                  ]
+            cumulativeCounts[model] = 0
+            echo "ℹ️  Reset cumulativeCounts['${model}'] → 0"
+            anyTriggered = true
           }
-
+    
+          if (!anyTriggered) {
+            echo "✅  No model exceeded threshold (${threshold}); no fine-tune triggered."
+          }
+    
+          // 10) Write updated counts back (no pretty flag)
+          writeJSON file: countsFile, json: cumulativeCounts
+          echo "🔍 [DEBUG] Wrote updated cumulativeCounts to '${countsFile}': ${cumulativeCounts}"
+    
+          // 11) Update offset
           writeFile file: offsetFile, text: totalLines.toString()
-        }
-      }
-    }
-  }
+          echo "🔍 [DEBUG] Updated '${offsetFile}' to ${totalLines}"
+        } // end script
+      }   // end steps
+    }     // end stage
+}
 
   post {
     success {

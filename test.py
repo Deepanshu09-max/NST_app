@@ -18,7 +18,7 @@ BASE_URL_INFERENCE_MODEL4 = "http://localhost:8004"
 SAMPLE_CONTENT_IMAGE_FILENAME = "sample_content_test.jpg"
 
 # For latest model test (now repurposed for dynamic prefix)
-PERSISTENT_STORAGE_MODELS_HOST_PATH = "./persistent_storage/models"
+PERSISTENT_STORAGE_MODELS_HOST_PATH = "/persistent_storage/models"
 LATEST_MODEL_TXT_FILENAME = "latest.txt" # Expects a checkpoint file name like "udnie.ckpt-done"
 
 # --- Helper Functions ---
