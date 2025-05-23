@@ -15,7 +15,7 @@ spec:
       containers:
         - name: fine-tuning-service
           image: deepanshu0903/nst_app:fine_tuning_service
-          imagePullPolicy: Never   
+          imagePullPolicy: IfNotPresent   
           ports:
             - containerPort: 8000
           volumeMounts:

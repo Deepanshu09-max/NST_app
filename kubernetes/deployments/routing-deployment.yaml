@@ -15,7 +15,7 @@ spec:
       containers:
         - name: routing-service
           image: deepanshu0903/nst_app:routing_service
-          imagePullPolicy: Never  
+          imagePullPolicy: IfNotPresent  
           ports:
             - containerPort: 8000
           volumeMounts:
