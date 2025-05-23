@@ -3,6 +3,13 @@
   hosts: local
   gather_facts: no
 
+  vars:
+    namespace: default
+    # If you only want to delete PVs matching a pattern (e.g. name starts with "nst-"),
+    # you can replace the k8s_info filter with a selectattr. 
+    # For now, we’ll delete *all* PVs to guarantee a completely clean slate.
+    pv_filter: ".*"  
+
   tasks:
     # ─────────────────────────────────────────────────────────────────────────────
     - name: Delete all Pods in {{ namespace }} namespace
