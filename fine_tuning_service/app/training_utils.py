@@ -115,7 +115,7 @@ def get_images(paths, height=None, width=None):
     for path in paths:
         try:
             print(f"DEBUG: Attempting to load image: {path}")
-            image = imread(path, pilomode='RGB')
+            image = imread(path)
             print(f"DEBUG: Loaded image: {path}, type: {type(image)}, shape: {getattr(image, 'shape', None)}")
         except Exception as e:
             print(f"Warning: Could not load image {path}: {e}")

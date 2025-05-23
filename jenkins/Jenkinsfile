@@ -44,7 +44,6 @@
             minikube start --driver=docker --profile="${PROFILE}"
           else
             echo "→ Using existing profile ‘${PROFILE}’"
-            minikube start --driver=docker --profile="${PROFILE}"
             minikube status --profile="${PROFILE}"
           fi
 
@@ -58,21 +57,21 @@
           pgrep -f "minikube mount --profile=${PROFILE}" \
             && echo "✔ Mount OK" \
             || ( echo "❌ Mount failed"; cat minikube-mount.log; exit 1 )
-
-          echo "▶ Dumping Minikube kubeconfig to persistent storage"
-          minikube -p "${PROFILE}" kubectl -- config view --raw \
-            > "/persistent_storage/minikube-kubeconfig.yaml"
-
-          if [ ! -s "/persistent_storage/minikube-kubeconfig.yaml" ]; then
-            echo "❌ Failed to dump kubeconfig"
+          
+          echo "▶ Dumping kubeconfig into mounted storage..."
+          minikube -p "${PROFILE}" kubectl -- config view --raw --flatten \
+            > "${SRC}/minikube-kubeconfig.yaml"
+    
+          if [ ! -s "${SRC}/minikube-kubeconfig.yaml" ]; then
+            echo "❌ kubeconfig dump failed"
             exit 1
           fi
-          echo "✅ kubeconfig is now at /persistent_storage/minikube-kubeconfig.yaml"
+    
+          echo "✅ kubeconfig is now at ${SRC}/minikube-kubeconfig.yaml"
         '''
         // No longer need to stash, since the kubeconfig lives directly in HOST_PERSISTENT_STORAGE
       }
     }
-
 
     //────────────────────────────────────────────────────────────────────────────
     stage('Build & Up Services (Compose inside Minikube)') {
@@ -81,32 +80,42 @@
           echo "▶ Switching Docker CLI to Minikube’s daemon"
           eval $(minikube -p "${MINIKUBE_PROFILE}" docker-env)
           echo "▶ Confirming Docker is now Minikube’s:"
+          docker images
           docker info | grep "Server Version" -m1
         '''
-
+    
         script {
+          // 1) Detect if any Dockerfile or .dockerignore changed
           def dockerfileDiff = sh(
             script: "git diff --name-only origin/${GIT_BRANCH} HEAD | grep -E 'Dockerfile|.dockerignore' || true",
             returnStdout: true
           ).trim()
-
+    
           if (dockerfileDiff) {
-            echo "⚠️ Detected Dockerfile changes; tearing down Minikube compose containers"
+            // 2a) If yes → tear down so that volumes/containers/images get cleaned up,
+            //     then rebuild everything from scratch.
+            echo "⚠️ Detected Dockerfile/.dockerignore changes; tearing down Minikube compose containers"
             sh 'docker-compose -p nstapp -f docker-compose.yml down -v --remove-orphans'
+    
+            echo "🚀 Building & launching services inside Minikube’s Docker…"
+            sh '''
+              docker-compose -p nstapp -f docker-compose.yml up -d --build
+              echo "✅ Compose up (with --build) finished."
+              docker ps | grep nstapp_
+            '''
           } else {
-            echo "✅ No Dockerfile changes; skipping tear down"
+            // 2b) If no → just bring up any missing services, but do NOT recreate existing containers
+            echo "✅ No Dockerfile changes; running `docker-compose up` with --no-recreate"
+            sh '''
+              docker-compose -p nstapp -f docker-compose.yml up -d --no-recreate
+              echo "✅ Compose up (no‐recreate) finished."
+              docker ps | grep nstapp_
+            '''
           }
         }
-
-        sh '''
-          echo "🚀 Building & launching services inside Minikube’s Docker…"
-          docker inspect deepanshu0903/nst_app:fine_tuning_service
-          docker-compose -p nstapp -f docker-compose.yml up -d --build
-          echo "✅ Compose up finished (should be fast if no changes)."
-          docker ps | grep nstapp_
-        '''
       }
     }
+
 
     //────────────────────────────────────────────────────────────────────────────
     stage('Integration Tests') {
