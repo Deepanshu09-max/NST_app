@@ -68,6 +68,7 @@
           fi
     
           echo "✅ kubeconfig is now at ${SRC}/minikube-kubeconfig.yaml"
+          nohup minikube addons enable ingress --profile=devops > /tmp/enable-ingress.log 2>&1 &
         '''
         // No longer need to stash, since the kubeconfig lives directly in HOST_PERSISTENT_STORAGE
       }
@@ -235,7 +236,6 @@
 
       stage('Deploy to K8s & ELK (Ansible)') {
         steps {
-          unstash 'kubecfg'
           sh '''
             export KUBECONFIG="/persistent_storage/minikube-kubeconfig.yaml"
             cd ansible/playbooks

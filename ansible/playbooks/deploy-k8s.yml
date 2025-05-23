@@ -3,12 +3,18 @@
   hosts: local
   gather_facts: no
 
+  vars:
+    # If your PVC or PV have different names, update these:
+    pv_name: nst-pv
+    pvc_name: nst-pvc
+    namespace: default
+
   tasks:
     - name: Ensure namespace `default` exists
       kubernetes.core.k8s:
         api_version: v1
         kind: Namespace
-        name: default
+        name: "{{ namespace }}"
         state: present
 
     - name: Apply PersistentVolume
@@ -16,17 +22,43 @@
         state: present
         src: "{{ k8s_manifests_dir }}/persistent-volumes/pv.yaml"
 
+    - name: Wait for PersistentVolume '{{ pv_name }}' to become Available or Bound
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: PersistentVolume
+        name: "{{ pv_name }}"
+      register: pv_info
+      until: pv_info.resources | length > 0
+             and (pv_info.resources[0].status.phase == "Available"
+                  or pv_info.resources[0].status.phase == "Bound")
+      retries: 12
+      delay: 5
+      failed_when: pv_info.resources | length == 0
+
     - name: Apply PersistentVolumeClaim
       kubernetes.core.k8s:
         state: present
         src: "{{ k8s_manifests_dir }}/persistent-volumes/pvc.yaml"
-        namespace: default
+        namespace: "{{ namespace }}"
+
+    - name: Wait for PersistentVolumeClaim '{{ pvc_name }}' to become Bound
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: PersistentVolumeClaim
+        name: "{{ pvc_name }}"
+        namespace: "{{ namespace }}"
+      register: pvc_info
+      until: pvc_info.resources | length > 0
+             and pvc_info.resources[0].status.phase == "Bound"
+      retries: 12
+      delay: 5
+      failed_when: pvc_info.resources | length == 0
 
     - name: Apply all deployment manifests
       kubernetes.core.k8s:
         state: present
         src: "{{ item }}"
-        namespace: default
+        namespace: "{{ namespace }}"
       with_fileglob:
         - "{{ k8s_manifests_dir }}/deployments/*.yaml"
 
@@ -34,7 +66,7 @@
       kubernetes.core.k8s:
         state: present
         src: "{{ item }}"
-        namespace: default
+        namespace: "{{ namespace }}"
       with_fileglob:
         - "{{ k8s_manifests_dir }}/services/*.yaml"
 
@@ -42,12 +74,12 @@
       kubernetes.core.k8s:
         state: present
         src: "{{ k8s_manifests_dir }}/ingress/ingress.yaml"
-        namespace: default
+        namespace: "{{ namespace }}"
 
-    - name: Gather all Pod objects in `default`
+    - name: Gather all Pod objects in `{{ namespace }}`
       kubernetes.core.k8s_info:
         kind: Pod
-        namespace: default
+        namespace: "{{ namespace }}"
       register: pod_list
 
     - name: Extract Pod names into a simple list
@@ -57,7 +89,7 @@
     - name: Wait for each Pod to become Ready
       shell: |
         kubectl wait --for=condition=Ready pod/{{ item }} \
-          --namespace=default --timeout=120s
+          --namespace={{ namespace }} --timeout=120s
       loop: "{{ pod_names }}"
       when: >
         (pod_list.resources
