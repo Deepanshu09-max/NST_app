@@ -13,8 +13,11 @@ except ImportError:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-PERSISTENT_STORAGE = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "../../persistent_storage")
+
+
+PERSISTENT_STORAGE = os.environ.get(
+    "HOST_PERSISTENT_STORAGE",
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "persistent_storage"))
 )
 MODELS_DIR = os.path.join(PERSISTENT_STORAGE, "models")
 CONTENT_DIR = os.path.join(PERSISTENT_STORAGE, "input_images")

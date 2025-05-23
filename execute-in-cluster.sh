@@ -83,3 +83,6 @@ echo "    e.g. http://$MINIKUBE_IP.nip.io"
 
 echo
 echo "🎉 Done! If things didn’t come up, inspect logs with 'kubectl describe' or 'kubectl logs'."
+
+
+minikube kubectl -- config view --raw > minikube-kubeconfig.yaml

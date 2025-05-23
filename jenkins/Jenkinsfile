@@ -1,4 +1,7 @@
-pipeline {
+
+
+
+  pipeline {
   agent any
 
   environment {
@@ -8,7 +11,7 @@ pipeline {
     MINIKUBE_PROFILE        = 'devops'
     FINE_TUNE_JOB           = 'NST_Fine_Tune_Job'
     BAD_FEEDBACK_THRESHOLD  = '5'  // Keep as string so .toInteger() works cleanly
-    HOST_PERSISTENT_STORAGE = '/home/deepanshu/Documents/SPE Major/NST_app/persistent_storage'
+    HOST_PERSISTENT_STORAGE = '/home/deepanshu/Documents/SPE_Major/NST_app/persistent_storage'
   }
 
   options {
@@ -37,9 +40,11 @@ pipeline {
           echo "→ Checking for existing profile ‘${PROFILE}’"
           if ! minikube profile list | grep -q "${PROFILE}"; then
             echo "→ No profile found; starting ‘${PROFILE}’"
+            minikube delete -p devops
             minikube start --driver=docker --profile="${PROFILE}"
           else
             echo "→ Using existing profile ‘${PROFILE}’"
+            minikube start --driver=docker --profile="${PROFILE}"
             minikube status --profile="${PROFILE}"
           fi
 
@@ -54,19 +59,20 @@ pipeline {
             && echo "✔ Mount OK" \
             || ( echo "❌ Mount failed"; cat minikube-mount.log; exit 1 )
 
-          echo "▶ Dumping kubeconfig for Ansible"
+          echo "▶ Dumping Minikube kubeconfig to persistent storage"
           minikube -p "${PROFILE}" kubectl -- config view --raw \
-            > "$WORKSPACE/minikube-kubeconfig.yaml"
+            > "/persistent_storage/minikube-kubeconfig.yaml"
 
-          if [ ! -s "$WORKSPACE/minikube-kubeconfig.yaml" ]; then
+          if [ ! -s "/persistent_storage/minikube-kubeconfig.yaml" ]; then
             echo "❌ Failed to dump kubeconfig"
             exit 1
           fi
-          echo "✅ kubeconfig dumped at $WORKSPACE/minikube-kubeconfig.yaml"
+          echo "✅ kubeconfig is now at /persistent_storage/minikube-kubeconfig.yaml"
         '''
-        stash name: 'kubecfg', includes: 'minikube-kubeconfig.yaml'
+        // No longer need to stash, since the kubeconfig lives directly in HOST_PERSISTENT_STORAGE
       }
     }
+
 
     //────────────────────────────────────────────────────────────────────────────
     stage('Build & Up Services (Compose inside Minikube)') {
@@ -222,7 +228,7 @@ pipeline {
         steps {
           unstash 'kubecfg'
           sh '''
-            export KUBECONFIG="$WORKSPACE/minikube-kubeconfig.yaml"
+            export KUBECONFIG="/persistent_storage/minikube-kubeconfig.yaml"
             cd ansible/playbooks
             ansible-playbook -i ../inventory.ini umbrella-playbook.yml
           '''
