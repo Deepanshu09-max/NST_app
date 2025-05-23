@@ -86,3 +86,5 @@ echo "🎉 Done! If things didn’t come up, inspect logs with 'kubectl describe
 
 
 minikube kubectl -- config view --raw > minikube-kubeconfig.yaml
+
+export KUBECONFIG=/home/deepanshu/Documents/SPE_Major/NST_app/persistent_storage/minikube-kubeconfig.yaml
