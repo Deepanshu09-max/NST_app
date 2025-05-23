@@ -94,6 +94,7 @@ pipeline {
 
         sh '''
           echo "🚀 Building & launching services inside Minikube’s Docker…"
+          docker inspect deepanshu0903/nst_app:fine_tuning_service
           docker-compose -p nstapp -f docker-compose.yml up -d --build
           echo "✅ Compose up finished (should be fast if no changes)."
           docker ps | grep nstapp_
@@ -112,21 +113,31 @@ pipeline {
     }
 
     //────────────────────────────────────────────────────────────────────────────
-    stage('Tag & Push Images (Store & Compare IDs)') {
+    stage('Tag & Push Images (Store & Compare IDs)') {
       steps {
         script {
-          // 1) Path to the JSON file where we’ll store last‑pushed ImageIDs
+          // 1) Path to the JSON file where we store last‑pushed ImageIDs
           def idsFile = "${env.HOST_PERSISTENT_STORAGE}/image_ids.json"
-
-          // 2) Make sure the file exists (if not, create an empty JSON object {})
-          if (!fileExists(idsFile)) {
+    
+          // 2) If the file does not exist or is empty, reinitialize it to a valid JSON object
+          if (!fileExists(idsFile) || readFile(idsFile).trim() == '') {
+            echo "⚙️  Creating or re‑initializing ${idsFile} → {}"
             writeFile file: idsFile, text: '{}'
           }
-
-          // 3) Read that JSON into a Map<String,String> (Groovy automatically parses JSON)
-          def storedIds = readJSON file: idsFile
-
-          // 4) List of all service tags (matching your docker‑compose image: tags)
+    
+          // 3) (Optional) Debug: show exactly what’s inside image_ids.json before parsing
+          echo "🔍 [DEBUG] contents of ${idsFile}:"
+          sh "cat ${idsFile} || echo '<file-not-found or empty>'"
+    
+          // 4) Parse the JSON (now guaranteed to be at least “{}”)
+          def storedIds
+          try {
+            storedIds = readJSON file: idsFile
+          } catch (Exception err) {
+            error("❌ Could not parse ${idsFile} as JSON: ${err.getMessage()}")
+          }
+    
+          // 5) List of all service tags
           def services = [
             'tf-base',
             'frontend',
@@ -137,82 +148,68 @@ pipeline {
             'inference_service_model3',
             'inference_service_model4'
           ]
-
-          // 5) Wrap login credentials so that $DOCKER_USER / $DOCKER_PASS become available
+    
+          // 6) Docker Hub credentials
           withCredentials([usernamePassword(
             credentialsId: "${DOCKER_CREDS}",
             usernameVariable: 'DOCKER_USER',
             passwordVariable: 'DOCKER_PASS'
           )]) {
-            // 6) For each service, compare local ImageID vs stored ID
             services.each { svc ->
               def localTag  = "deepanshu0903/nst_app:${svc}"
               def remoteTag = "${env.DOCKER_USER}/nst_app:${svc}"
-
+    
               echo ">>> Checking '${svc}'"
-
+    
               // a) Does the local image exist?
               def localExists = sh(
                 script: "docker image inspect ${localTag} >/dev/null 2>&1 && echo 'YES' || echo 'NO'",
                 returnStdout: true
               ).trim()
-
+    
               if (localExists != 'YES') {
-                echo "❌ Local image '${localTag}' not found; skipping."
+                echo "❌ Local image '${localTag}' not found; skipping."
                 return
               }
-
+    
               // b) Get the current local ID
               def localId = sh(
                 script: "docker image inspect --format='{{.Id}}' ${localTag}",
                 returnStdout: true
               ).trim()
-
-              // c) Look up the previously stored ID for this service (or empty if missing)
+    
+              // c) Look up the previously stored ID (or empty if missing)
               def prevId = storedIds[svc] ?: ''
-
               echo "    Local ID: ${localId}"
               echo "    Prev Stored ID: ${prevId ?: '<none>'}"
-
+    
               if (prevId == localId) {
-                // IDs match → nothing changed → skip push
-                echo "➖ ${svc} unchanged (IDs match); skipping push"
+                echo "➖ ${svc} unchanged (IDs match); skipping push"
               } else {
-                // IDs differ or no previous data → we need to push
-                echo "🔖 ${svc} changed (or first‑time); pushing…"
-
+                echo "🔖 ${svc} changed (or first‐time); pushing…"
+    
                 // d) Tag & push
-                sh '''
+                sh """
                   echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
                   docker tag "${localTag}" "${remoteTag}"
                   docker push "${remoteTag}"
-                '''.stripIndent()
-
-                // e) After a successful push, update storedIds[svc] = localId
+                """.stripIndent()
+    
+                // e) After successful push, update storedIds[svc] = localId
                 storedIds[svc] = localId
-
+    
                 // f) Write the updated map back to the JSON file
                 writeJSON file: idsFile, json: storedIds, pretty: true
                 echo "    ✏️ Updated stored ID for '${svc}' → ${localId}"
               }
             } // end services.each
+    
             echo "✅ All 'store & compare IDs' tasks finished"
           } // end withCredentials
         } // end script
       } // end steps
     } // end stage
 
-    //────────────────────────────────────────────────────────────────────────────
-    stage('Deploy to K8s & ELK (Ansible)') {
-      steps {
-        unstash 'kubecfg'
-        sh '''
-          export KUBECONFIG="$WORKSPACE/minikube-kubeconfig.yaml"
-          cd ansible/playbooks
-          ansible-playbook -i ../inventory.ini umbrella-playbook.yml
-        '''
-      }
-    }
 
     //────────────────────────────────────────────────────────────────────────────
     stage('Check Feedback & Trigger Fine-Tuning') {
