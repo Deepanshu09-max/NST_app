@@ -44,16 +44,23 @@
         src: "{{ k8s_manifests_dir }}/ingress/ingress.yaml"
         namespace: default
 
-
-    - name: Wait for all pods to be ready
+    - name: Gather all Pod objects in `default`
       kubernetes.core.k8s_info:
         kind: Pod
         namespace: default
       register: pod_list
 
-    - name: Ensure all pods are ready
-      shell: |
-        kubectl wait --for=condition=Ready pod/{{ item.metadata.name }} --namespace=default --timeout=120s
-      loop: "{{ pod_list.resources }}"
-      when: item.status.phase != 'Succeeded'
+    - name: Extract Pod names into a simple list
+      set_fact:
+        pod_names: "{{ pod_list.resources | map(attribute='metadata.name') | list }}"
 
+    - name: Wait for each Pod to become Ready
+      shell: |
+        kubectl wait --for=condition=Ready pod/{{ item }} \
+          --namespace=default --timeout=120s
+      loop: "{{ pod_names }}"
+      when: >
+        (pod_list.resources
+         | selectattr('metadata.name','equalto',item)
+         | map(attribute='status.phase')
+         | first) != 'Succeeded'

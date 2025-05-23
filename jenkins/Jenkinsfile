@@ -1,391 +1,332 @@
-pipeline {
-  agent any
+  pipeline {
+    agent any
 
-  environment {
-    GITHUB_REPO_URL         = 'https://github.com/Deepanshu09-max/NST_app.git'
-    GIT_BRANCH              = 'devops'
-    DOCKER_CREDS            = 'dockerhub-credentials'
-    KUBECONFIG_CRED         = 'minikube-kubeconfig'
-    FINE_TUNE_JOB           = 'NST_Fine_Tune_Job'
-    BAD_FEEDBACK_THRESHOLD  = 5
-    HOST_PERSISTENT_STORAGE = '/home/deepanshu/Documents/SPE Major/NST_app/persistent_storage'
-  }
+    environment {
+      GITHUB_REPO_URL         = 'https://github.com/Deepanshu09-max/NST_app.git'
+      GIT_BRANCH              = 'devops'
+      DOCKER_CREDS            = 'dockerhub-credentials'
+      MINIKUBE_PROFILE        = 'devops'
+      FINE_TUNE_JOB           = 'NST_Fine_Tune_Job'
+      BAD_FEEDBACK_THRESHOLD  = '5'  // Keep as string so .toInteger() works cleanly
+      HOST_PERSISTENT_STORAGE = '/home/deepanshu/Documents/SPE Major/NST_app/persistent_storage'
+    }
 
-  options {
-    timestamps()
-    buildDiscarder(logRotator(numToKeepStr: '10'))
-  }
+    options {
+      timestamps()
+      buildDiscarder(logRotator(numToKeepStr: '10'))
+    }
 
-  stages {
-    stage('Pre-flight: Docker login & Kubeconfig') {
-      steps {
-        withCredentials([usernamePassword(
-          credentialsId: "${DOCKER_CREDS}",
-          usernameVariable: 'DOCKER_USER',
-          passwordVariable: 'DOCKER_PASS'
-        )]) {
-          sh '''
-            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-          '''
-        }
-        withCredentials([file(
-          credentialsId: "${KUBECONFIG_CRED}",
-          variable: 'KUBE_CONFIG'
-        )]) {
-          sh '''
-            export KUBECONFIG=$KUBE_CONFIG
-            echo "🛠️  Using KUBECONFIG from Jenkins credentials"
-            kubectl version --client
-          '''
+    stages {
+      //────────────────────────────────────────────────────────────────────────────
+      stage('Checkout') {
+        steps {
+          git branch: "${GIT_BRANCH}", url: "${GITHUB_REPO_URL}"
         }
       }
-    }
 
-    stage('Checkout') {
-      steps {
-        git branch: "${GIT_BRANCH}", url: "${GITHUB_REPO_URL}"
+      //────────────────────────────────────────────────────────────────────────────
+      stage('Ensure Minikube & Mount') {
+        steps {
+          sh '''
+            SRC="${HOST_PERSISTENT_STORAGE}"
+            PROFILE="${MINIKUBE_PROFILE}"
+
+            echo "▶ Killing any prior minikube mount"
+            pkill -f "minikube mount --profile=${PROFILE}" || true
+
+            echo "→ Checking for existing profile ‘${PROFILE}’"
+            if ! minikube profile list | grep -q "${PROFILE}"; then
+              echo "→ No profile found; starting ‘${PROFILE}’"
+              minikube start --driver=docker --profile="${PROFILE}"
+            else
+              echo "→ Using existing profile ‘${PROFILE}’"
+              minikube status --profile="${PROFILE}"
+            fi
+
+            echo "▶ Mounting host → Minikube:/persistent_storage"
+            nohup minikube mount --profile="${PROFILE}" \
+                "${SRC}:/persistent_storage" \
+                --uid=$(id -u) --gid=$(id -g) \
+              > minikube-mount.log 2>&1 &
+
+            sleep 5
+            pgrep -f "minikube mount --profile=${PROFILE}" \
+              && echo "✔ Mount OK" \
+              || ( echo "❌ Mount failed"; cat minikube-mount.log; exit 1 )
+
+            echo "▶ Dumping kubeconfig for Ansible"
+            minikube -p "${PROFILE}" kubectl -- config view --raw \
+              > "$WORKSPACE/minikube-kubeconfig.yaml"
+
+            if [ ! -s "$WORKSPACE/minikube-kubeconfig.yaml" ]; then
+              echo "❌ Failed to dump kubeconfig"
+              exit 1
+            fi
+            echo "✅ kubeconfig dumped at $WORKSPACE/minikube-kubeconfig.yaml"
+          '''
+          stash name: 'kubecfg', includes: 'minikube-kubeconfig.yaml'
+        }
       }
-    }
-    stage('Wipe Conflicting Containers') {
-      steps {
-        sh '''
-          echo "--- Checking for containers publishing your ports ---"
-          docker ps --format '{{.ID}} {{.Names}} {{.Ports}}' \
-            | grep -E '8080->|800[0-5]->' || echo "👍 No conflicts found"
-    
-          echo "--- Removing any conflicting containers ---"
-          # Find any container bound to 80,8000–8005
-          docker ps -q --filter "publish=80" \
-            --filter "publish=8000" \
-            --filter "publish=8001" \
-            --filter "publish=8002" \
-            --filter "publish=8003" \
-            --filter "publish=8004" \
-            --filter "publish=8005" \
-          | xargs --no-run-if-empty docker rm -f
-    
-          echo "--- Done cleaning up port-binding containers ---"
-        '''
+
+      //────────────────────────────────────────────────────────────────────────────
+      stage('Build & Up Services (Compose inside Minikube)') {
+        steps {
+          sh '''
+            echo "▶ Switching Docker CLI to Minikube’s daemon"
+            eval $(minikube -p "${MINIKUBE_PROFILE}" docker-env)
+            echo "▶ Confirming Docker is now Minikube’s:"
+            docker info | grep "Server Version" -m1
+          '''
+
+          script {
+            def dockerfileDiff = sh(
+              script: "git diff --name-only origin/${GIT_BRANCH} HEAD | grep -E 'Dockerfile|.dockerignore' || true",
+              returnStdout: true
+            ).trim()
+
+            if (dockerfileDiff) {
+              echo "⚠️ Detected Dockerfile changes; tearing down Minikube compose containers"
+              sh 'docker-compose -p nstapp -f docker-compose.yml down -v --remove-orphans'
+            } else {
+              echo "✅ No Dockerfile changes; skipping tear down"
+            }
+          }
+
+          sh '''
+            echo "🚀 Building & launching services inside Minikube’s Docker…"
+            docker-compose -p nstapp -f docker-compose.yml up -d --build
+            echo "✅ Compose up finished (should be fast if no changes)."
+            docker ps | grep nstapp_
+          '''
+        }
       }
-    }
-    stage('Pre-Compose Cleanup') {
-      steps {
-        sh '''
-          echo "🧹 Tear down any old compose stacks (both named & default)…"
-          # Named (project = nstapp)
-          docker-compose -p nstapp -f docker-compose.yml down -v --remove-orphans || true
-          # Default (project = working-dir basename)
-          docker-compose          -f docker-compose.yml down -v --remove-orphans || true
-    
-          echo "🧹 Remove stray containers by name prefix"
-          docker ps -a --filter "name=^/nstapp_" -q \
-            | xargs --no-run-if-empty docker rm -f
-    
-          echo "🧹 Kill anything still listening on port 8080"
-          # If it's a Docker container: remove it
-          docker ps -q --filter publish=8080 \
-            | xargs --no-run-if-empty docker rm -f
-          # If it's any process: kill it
-          lsof -i :8080 -t \
-            | xargs --no-run-if-empty kill -9
-    
-          echo "🧹 Prune unused images, networks, volumes"
-          docker network prune -f
-          docker system prune -af
-    
-          echo "🔧 Reset workspace persistent_storage folder"
-          sudo rm -rf persistent_storage
-          mkdir -p persistent_storage
-        '''
-      }
-    }
-    
-    stage('Mount persistent_storage & Enable Ingress in Minikube') {
-      steps {
-        sh """
-          SRC=\"${HOST_PERSISTENT_STORAGE}\"
-    
-          echo "▶ Killing any prior minikube mount processes"
-          pkill -f 'minikube mount' || true
-    
-          echo "→ Verifying host-folder exists and is accessible"
-          ls -ld "\${SRC}" || { echo "❌ \${SRC} not found"; exit 1; }
-    
-          echo "→ Checking Minikube status (host component only)"
-          if ! minikube status --format='{{.Host}}' | grep -q "Running"; then
-            echo "→ Minikube not running; starting with Docker driver…"
-            minikube delete
-            minikube start --driver=docker
-          else
-            echo "→ Minikube is already running."
-          fi
-    
-          echo "▶ Mounting \"\${SRC}\" → Minikube:/persistent_storage"
-          nohup minikube mount "\${SRC}":/persistent_storage \
-                --uid=\$(id -u) --gid=\$(id -g) \
-                > minikube-mount.log 2>&1 &
-    
-          sleep 5
-    
-          echo "▶ Checking minikube-mount is up"
-          if pgrep -f 'minikube mount' > /dev/null; then
-            echo "✔ mount OK (PID=\$(pgrep -f 'minikube mount'))"
-          else
-            echo "❌ mount failed; logs:"
-            cat minikube-mount.log || echo "Log empty or not found"
-            exit 1
-          fi
-    
-          echo "▶ Enabling Ingress addon (in background; not blocking)…"
-          nohup minikube addons enable ingress \
-                > minikube-ingress-enable.log 2>&1 &
-    
-          echo "ℹ️ Ingress enable kicked off; continuing without wait."
-        """
-      }
-    }
-    
-    
-        
-        
 
-    stage('Debug: Compose Config & Networks') {
-      steps {
-        sh '''
-          echo "--- Effective Compose Configuration ---"
-          docker network ls | grep nstapp_app_network || true
-          docker-compose -p nstapp -f docker-compose.yml config
-          echo
-          echo "--- Docker Networks ---"
-          docker network ls
-        '''
-      }
-    }
-
-
-
-   stage('Build & Up Services (Docker-Compose)') {
-      steps {
-        sh '''
-          echo "🚀 Building & launching all services under project 'nstapp'…"
-    
-          echo "--- Networks just before up ---"
-          docker network ls
-          echo "▶ Proceeding with Docker Compose up & build"
-          docker-compose -p nstapp -f docker-compose.yml up -d --build
-    
-          echo "✅ Post-up network check for 'nstapp_app_network'"
-          docker network ls | grep nstapp_app_network || echo "⚠️ Network not found"
-          docker ps  | grep inference_service_model
-          docker logs nstapp_inference_service_model1_1
-
-        '''
-      }
-    }
-
+      //────────────────────────────────────────────────────────────────────────────
     stage('Integration Tests') {
       steps {
         sh '''
           echo "▶ Running integration tests"
-          python3 test.py || true
+          pip3 install requests Pillow --break-system-packages
+          python3 test.py
         '''
       }
     }
 
-    stage('Tag & Push Images') {
-      steps {
-        withCredentials([usernamePassword(
-          credentialsId: "${DOCKER_CREDS}",
-          usernameVariable: 'DOCKER_USER',
-          passwordVariable: 'DOCKER_PASS'
-        )]) {
+      //────────────────────────────────────────────────────────────────────────────
+      stage('Tag & Push Images') {
+        steps {
+          withCredentials([usernamePassword(
+            credentialsId: "${DOCKER_CREDS}",
+            usernameVariable: 'DOCKER_USER',
+            passwordVariable: 'DOCKER_PASS'
+          )]) {
+            sh '''
+              echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+
+              for svc in \
+                base-tf \
+                frontend \
+                routing_service \
+                fine_tuning_service \
+                inference_service_model1 \
+                inference_service_model2 \
+                inference_service_model3 \
+                inference_service_model4; do
+
+                # ───────── Begin subshell ───────────────────────────
+                (
+                  LOCAL_IMG="$DOCKER_USER/nst_app:${svc}"
+                  REMOTE_IMG="$DOCKER_USER/nst_app:${svc}"
+
+                  # Pull existing remote (to compare digest)
+                  docker pull "${REMOTE_IMG}" >/dev/null 2>&1 || true
+
+                  # Get digests (empty string if not present)
+                  LOCAL_DIG=$(docker image inspect --format='{{index .RepoDigests 0}}' "${LOCAL_IMG}" 2>/dev/null || echo "")
+                  REMOTE_DIG=$(docker image inspect --format='{{index .RepoDigests 0}}' "${REMOTE_IMG}" 2>/dev/null || echo "")
+
+                  if [ -n "$LOCAL_DIG" ] && [ "$LOCAL_DIG" != "$REMOTE_DIG" ]; then
+                    echo "🔖 Pushing updated image for ${svc}"
+                    docker tag "${LOCAL_IMG}" "${REMOTE_IMG}"
+                    docker push "${REMOTE_IMG}"
+                  else
+                    echo "➖ ${svc} unchanged or missing local image; skipping push"
+                  fi
+                ) &
+                # ───────── End subshell ─────────────────────────────
+
+              done
+
+              # Wait for all background pushes to finish
+              wait
+              echo "✅ All tag & push tasks finished"
+            '''
+          }
+        }
+      }
+
+      //────────────────────────────────────────────────────────────────────────────
+      stage('Deploy to K8s & ELK (Ansible)') {
+        steps {
+          unstash 'kubecfg'
           sh '''
-            echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-
-            for svc in \
-              base-tf \
-              frontend \
-              routing_service \
-              fine_tuning_service \
-              inference_service_model1 \
-              inference_service_model2 \
-              inference_service_model3 \
-              inference_service_model4; do
-
-              echo "🔖 Tag & push nst_app_${svc}:latest → $DOCKER_USER/nst_app:${svc}"
-              docker tag nst_app_${svc}:latest $DOCKER_USER/nst_app:${svc}
-              docker push $DOCKER_USER/nst_app:${svc}
-            done
+            export KUBECONFIG="$WORKSPACE/minikube-kubeconfig.yaml"
+            cd ansible/playbooks
+            ansible-playbook -i ../inventory.ini umbrella-playbook.yml
           '''
         }
       }
-    }
 
-    stage('Deploy to K8s & ELK (Ansible)') {
-      steps {
+      //────────────────────────────────────────────────────────────────────────────
+      stage('Check Feedback & Trigger Fine-Tuning') {
+        steps {
+          script {
+            // Paths to files (note spaces in “SPE Major” are already quoted via $HOST_PERSISTENT_STORAGE)
+            def fbFile     = "${env.HOST_PERSISTENT_STORAGE}/feedback.jsonl"
+            def offsetFile = "${env.HOST_PERSISTENT_STORAGE}/feedback.offset"
+            def countsFile = "${env.HOST_PERSISTENT_STORAGE}/feedback.counts.json"
+
+            // 1) Verify feedback.jsonl exists
+            echo "🔍 [DEBUG] Looking for feedback file at: ${fbFile}"
+            if (!fileExists(fbFile)) {
+              echo "ℹ️  No feedback file found at '${fbFile}' → skipping fine-tune check."
+              return
+            }
+
+            // 2) Read all lines from feedback.jsonl
+            def allLines = []
+            try {
+              allLines = readFile(fbFile).readLines()
+            } catch (err) {
+              echo "❌  Failed to read '${fbFile}': ${err.getMessage()}"
+              return
+            }
+            def totalLines = allLines.size()
+            echo "🔍 [DEBUG] totalLines = ${totalLines}"
+
+            // 3) Determine last offset (default to 0 if missing/invalid)
+            int offsetValue = 0
+            if (fileExists(offsetFile)) {
+              try {
+                offsetValue = readFile(offsetFile).trim().toInteger()
+                echo "🔍 [DEBUG] Parsed offsetValue = ${offsetValue}"
+              } catch (Exception e) {
+                echo "⚠️  Invalid offset in '${offsetFile}'; resetting to 0."
+                offsetValue = 0
+              }
+            } else {
+              echo "🔍 [DEBUG] No offset file at '${offsetFile}'; defaulting offsetValue = 0"
+            }
+
+            // If offsetValue > totalLines (file truncated), reset to 0
+            if (offsetValue > totalLines) {
+              echo "⚠️  offsetValue (${offsetValue}) > totalLines (${totalLines}); resetting offset → 0"
+              offsetValue = 0
+            }
+
+            // 4) If no new lines, update offset and exit
+            if (totalLines <= offsetValue) {
+              echo "✅  No new feedback (offset=${offsetValue}, totalLines=${totalLines})."
+              writeFile file: offsetFile, text: totalLines.toString()
+              echo "🔍 [DEBUG] Wrote new offset (${totalLines}) to '${offsetFile}'"
+              return
+            }
+
+            // 5) Compute newLines array
+            def newLines = allLines[offsetValue..<totalLines]
+            echo "ℹ️  Found ${newLines.size()} new line(s) of feedback"
+
+            // 6) Load existing cumulative “bad” counts
+            def cumulativeCounts = [:]
+            if (fileExists(countsFile)) {
+              try {
+                cumulativeCounts = readJSON file: countsFile
+                echo "🔍 [DEBUG] Loaded cumulativeCounts = ${cumulativeCounts}"
+              } catch (Exception e) {
+                echo "⚠️  Could not parse '${countsFile}'; initializing all counts to 0."
+                cumulativeCounts = [:]
+              }
+            } else {
+              echo "🔍 [DEBUG] No counts file at '${countsFile}'; initializing all counts to 0."
+            }
+
+            // 7) Count “bad” feedback in newLines per model
+            def newBadCounts = [:].withDefault { 0 }
+            newLines.eachWithIndex { line, idx ->
+              def text = line?.trim()
+              if (!text) {
+                echo "⚠️  newLines[${idx}] empty or whitespace, skipping"
+                return
+              }
+              try {
+                echo "🔍 [DEBUG] Parsing JSON on newLines[${idx}]"
+                def json = readJSON(text: text)
+                echo "🔍 [DEBUG] Parsed: feedback='${json.feedback}', model='${json.model}'"
+                if (json.feedback == 'bad' && json.model) {
+                  newBadCounts[json.model] += 1
+                }
+              } catch (Exception e) {
+                echo "❌  JSON parse error on newLines[${idx}]: ${e.getMessage()}"
+                echo "🔍 [DEBUG] Raw line content: ${text}"
+              }
+            }
+
+            // 8) Merge newBadCounts into cumulativeCounts and collect models to trigger
+            def threshold = env.BAD_FEEDBACK_THRESHOLD.toInteger()
+            def toTrigger = []
+            newBadCounts.each { model, badThisRun ->
+              int oldCount = cumulativeCounts.containsKey(model) ? (cumulativeCounts[model] as Integer) : 0
+              int updatedCount = oldCount + badThisRun
+              cumulativeCounts[model] = updatedCount
+              echo "📊  Model='${model}', oldBad=${oldCount}, newBad=${badThisRun}, totalBad=${updatedCount}"
+              if (updatedCount >= threshold) {
+                toTrigger << model
+              }
+            }
+
+            // 9) Trigger fine‑tune for any model that hit threshold, then reset its count
+            def anyTriggered = false
+            toTrigger.unique().each { model ->
+              echo "▶ Triggering fine‑tune for '${model}'"
+              build job: "${FINE_TUNE_JOB}",
+                    wait: false,
+                    parameters: [
+                      string(name: 'BAD_FEEDBACK_COUNT', value: cumulativeCounts[model].toString()),
+                      string(name: 'MODEL_NAME',         value: model)
+                    ]
+              cumulativeCounts[model] = 0
+              echo "ℹ️  Reset cumulativeCounts['${model}'] → 0"
+              anyTriggered = true
+            }
+
+            if (!anyTriggered) {
+              echo "✅  No model exceeded threshold (${threshold}); no fine‑tune triggered."
+            }
+
+            // 10) Write updated counts back
+            writeJSON file: countsFile, json: cumulativeCounts
+            echo "🔍 [DEBUG] Wrote updated cumulativeCounts to '${countsFile}': ${cumulativeCounts}"
+
+            // 11) Update offset
+            writeFile file: offsetFile, text: totalLines.toString()
+            echo "🔍 [DEBUG] Updated '${offsetFile}' to ${totalLines}"
+          } // end script
+        }   // end steps
+      }     // end stage
+    }       // ─── Close stages ───
+
+    post {
+      success {
+        echo '✅ Pipeline completed successfully.'
+      }
+      failure {
+        echo '❌ Pipeline failed — please inspect the logs.'
+      }
+      always {
         sh '''
-          export KUBECONFIG=$KUBE_CONFIG
-          cd ansible/playbooks
-          ansible-playbook -i ../inventory.ini umbrella-playbook.yml
+          echo "▶ Killing minikube mount"
+          pkill -f "minikube mount" || true
         '''
       }
     }
-
-    stage('Check Feedback & Trigger Fine-Tuning') {
-      steps {
-        script {
-          // Paths to files
-          def fbFile     = "${env.HOST_PERSISTENT_STORAGE}/feedback.jsonl"
-          def offsetFile = "${env.HOST_PERSISTENT_STORAGE}/feedback.offset"
-          def countsFile = "${env.HOST_PERSISTENT_STORAGE}/feedback.counts.json"
-    
-          // 1) Verify feedback.jsonl exists
-          echo "🔍 [DEBUG] Looking for feedback file at: ${fbFile}"
-          if (!fileExists(fbFile)) {
-            echo "ℹ️  No feedback file found at '${fbFile}' → skipping fine-tune check."
-            return
-          }
-    
-          // 2) Read all lines from feedback.jsonl
-          def allLines = []
-          try {
-            allLines = readFile(fbFile).readLines()
-          } catch (err) {
-            echo "❌  Failed to read '${fbFile}': ${err.getMessage()}"
-            return
-          }
-          def totalLines = allLines.size()
-          echo "🔍 [DEBUG] totalLines = ${totalLines}"
-    
-          // 3) Determine last offset (default to 0 if missing/invalid)
-          int offsetValue = 0
-          if (fileExists(offsetFile)) {
-            try {
-              offsetValue = readFile(offsetFile).trim().toInteger()
-              echo "🔍 [DEBUG] Parsed offsetValue = ${offsetValue}"
-            } catch (Exception e) {
-              echo "⚠️  Invalid offset in '${offsetFile}'; resetting to 0."
-              offsetValue = 0
-            }
-          } else {
-            echo "🔍 [DEBUG] No offset file at '${offsetFile}'; defaulting offsetValue = 0"
-          }
-    
-          // Reset offset if larger than total
-          if (offsetValue > totalLines) {
-            echo "⚠️  offsetValue (${offsetValue}) > totalLines (${totalLines}); resetting offset → 0"
-            offsetValue = 0
-          }
-    
-          // 4) If no new lines, update offset and exit
-          if (totalLines <= offsetValue) {
-            echo "✅  No new feedback (offset=${offsetValue}, totalLines=${totalLines})."
-            writeFile file: offsetFile, text: totalLines.toString()
-            echo "🔍 [DEBUG] Wrote new offset (${totalLines}) to '${offsetFile}'"
-            return
-          }
-    
-          // 5) Compute newLines array
-          def newLines = allLines[offsetValue..<totalLines]
-          echo "ℹ️  Found ${newLines.size()} new line(s) of feedback"
-    
-          // 6) Load existing cumulative “bad” counts
-          def cumulativeCounts = [:]
-          if (fileExists(countsFile)) {
-            try {
-              cumulativeCounts = readJSON file: countsFile
-              echo "🔍 [DEBUG] Loaded cumulativeCounts = ${cumulativeCounts}"
-            } catch (Exception e) {
-              echo "⚠️  Could not parse '${countsFile}'; initializing all counts to 0."
-              cumulativeCounts = [:]
-            }
-          } else {
-            echo "🔍 [DEBUG] No counts file at '${countsFile}'; initializing all counts to 0."
-          }
-    
-          // 7) Count “bad” feedback in newLines per model
-          def newBadCounts = [:]   // plain map
-    
-          newLines.eachWithIndex { line, idx ->
-            def text = line?.trim()
-            if (!text) {
-              echo "⚠️  newLines[${idx}] empty or whitespace, skipping"
-              return
-            }
-            try {
-              echo "🔍 [DEBUG] Parsing JSON on newLines[${idx}]"
-              def json = readJSON text: text
-              echo "🔍 [DEBUG] Parsed: feedback='${json.feedback}', model='${json.model}'"
-              if (json.feedback == 'bad' && json.model) {
-                def prev = newBadCounts.containsKey(json.model) ? newBadCounts[json.model] : 0
-                newBadCounts[json.model] = prev + 1
-              }
-            } catch (Exception e) {
-              echo "❌  JSON parse error on newLines[${idx}]: ${e.toString()}"
-            }
-          }
-    
-          // 8) Merge into cumulativeCounts and decide triggers
-          def threshold = env.BAD_FEEDBACK_THRESHOLD.toInteger()
-          def toTrigger = []
-          newBadCounts.each { model, badThisRun ->
-            def oldCount = cumulativeCounts.containsKey(model) ? (cumulativeCounts[model] as Integer) : 0
-            def updated  = oldCount + badThisRun
-            cumulativeCounts[model] = updated
-            echo "📊  Model='${model}', oldBad=${oldCount}, newBad=${badThisRun}, totalBad=${updated}"
-            if (updated >= threshold) {
-              toTrigger << model
-            }
-          }
-    
-          // 9) Trigger fine-tune for any model that hit threshold, then reset its count
-          def anyTriggered = false
-          toTrigger.unique().each { model ->
-            echo "▶ Triggering fine-tune for '${model}'"
-            build job: "${FINE_TUNE_JOB}",
-                  wait: false,
-                  parameters: [
-                    string(name: 'BAD_FEEDBACK_COUNT', value: cumulativeCounts[model].toString()),
-                    string(name: 'MODEL_NAME',         value: model)
-                  ]
-            cumulativeCounts[model] = 0
-            echo "ℹ️  Reset cumulativeCounts['${model}'] → 0"
-            anyTriggered = true
-          }
-    
-          if (!anyTriggered) {
-            echo "✅  No model exceeded threshold (${threshold}); no fine-tune triggered."
-          }
-    
-          // 10) Write updated counts back (no pretty flag)
-          writeJSON file: countsFile, json: cumulativeCounts
-          echo "🔍 [DEBUG] Wrote updated cumulativeCounts to '${countsFile}': ${cumulativeCounts}"
-    
-          // 11) Update offset
-          writeFile file: offsetFile, text: totalLines.toString()
-          echo "🔍 [DEBUG] Updated '${offsetFile}' to ${totalLines}"
-        } // end script
-      }   // end steps
-    }     // end stage
-}
-
-  post {
-    success {
-      echo '✅ Pipeline completed successfully.'
-    }
-    failure {
-      echo '❌ Pipeline failed — please inspect the logs.'
-    }
-    always {
-      sh '''
-        echo "🧹 Cleaning up: Docker & Minikube mounts"
-        docker-compose -p nstapp -f docker-compose.yml down --remove-orphans
-        docker system prune -af || true
-        docker network prune -f
-
-        echo "▶ Killing minikube mount"
-        pkill -f "minikube mount" || true
-      '''
-    }
-  }
-}
+  } // ─── Close pipeline ───
