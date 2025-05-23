@@ -4,32 +4,77 @@
   gather_facts: no
 
   tasks:
-    - name: Delete all pods
+    - name: Delete all Pods in default namespace
+      kubernetes.core.k8s_info:
+        kind: Pod
+        namespace: default
+      register: pods
+
+    - name: Delete Pods
       kubernetes.core.k8s:
         state: absent
         kind: Pod
         namespace: default
+        name: "{{ item.metadata.name }}"
+      loop: "{{ pods.resources }}"
+      when: pods.resources | length > 0
+
+    - name: Delete all Deployments in default
+      kubernetes.core.k8s_info:
+        kind: Deployment
+        namespace: default
+      register: deployments
 
     - name: Delete Deployments
       kubernetes.core.k8s:
         state: absent
         kind: Deployment
         namespace: default
+        name: "{{ item.metadata.name }}"
+      loop: "{{ deployments.resources }}"
+      when: deployments.resources | length > 0
+
+    - name: Delete all Services in default
+      kubernetes.core.k8s_info:
+        kind: Service
+        namespace: default
+      register: services
 
     - name: Delete Services
       kubernetes.core.k8s:
         state: absent
         kind: Service
         namespace: default
+        name: "{{ item.metadata.name }}"
+      loop: "{{ services.resources }}"
+      when: services.resources | length > 0
+
+    - name: Delete all PVCs in default
+      kubernetes.core.k8s_info:
+        kind: PersistentVolumeClaim
+        namespace: default
+      register: pvcs
 
     - name: Delete PVCs
       kubernetes.core.k8s:
         state: absent
         kind: PersistentVolumeClaim
         namespace: default
+        name: "{{ item.metadata.name }}"
+      loop: "{{ pvcs.resources }}"
+      when: pvcs.resources | length > 0
 
-    - name: Delete ELK resources
+    - name: Delete all ELK Deployments
+      kubernetes.core.k8s_info:
+        kind: Deployment
+        namespace: elk
+      register: elk_deployments
+
+    - name: Delete ELK Deployments
       kubernetes.core.k8s:
         state: absent
         kind: Deployment
         namespace: elk
+        name: "{{ item.metadata.name }}"
+      loop: "{{ elk_deployments.resources }}"
+      when: elk_deployments.resources | length > 0
