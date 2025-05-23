@@ -182,7 +182,7 @@ def save_images(paths, datas, save_path, prefix=None, suffix=None):
 CONTENT_LAYER = 'relu4_2'
 STYLE_LAYERS  = ('relu1_1', 'relu2_1', 'relu3_1', 'relu4_1', 'relu5_1')
 
-TRAINING_IMAGE_SHAPE = (256, 256, 3) # (height, width, color_channels)
+TRAINING_IMAGE_SHAPE = (32, 32, 3) # (height, width, color_channels)
 
 EPOCHS = 2
 BATCH_SIZE = 4
