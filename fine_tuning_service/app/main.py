@@ -13,9 +13,10 @@ except ImportError:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-PERSISTENT_STORAGE = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "../../persistent_storage")
-)
+
+
+PERSISTENT_STORAGE = "/persistent_storage"
+
 MODELS_DIR = os.path.join(PERSISTENT_STORAGE, "models")
 CONTENT_DIR = os.path.join(PERSISTENT_STORAGE, "input_images")
 VGG_WEIGHTS_PATH = os.path.join(PERSISTENT_STORAGE, "vgg19.npz") # Corrected VGG weights path

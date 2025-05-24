@@ -3,33 +3,133 @@
   hosts: local
   gather_facts: no
 
+  vars:
+    namespace: default
+    # If you only want to delete PVs matching a pattern (e.g. name starts with "nst-"),
+    # you can replace the k8s_info filter with a selectattr. 
+    # For now, we’ll delete *all* PVs to guarantee a completely clean slate.
+    pv_filter: ".*"  
+
   tasks:
-    - name: Delete all pods
+    # ─────────────────────────────────────────────────────────────────────────────
+    - name: Delete all Pods in {{ namespace }} namespace
+      kubernetes.core.k8s_info:
+        kind: Pod
+        namespace: "{{ namespace }}"
+      register: pods
+
+    - name: Delete Pods
       kubernetes.core.k8s:
         state: absent
         kind: Pod
-        namespace: default
+        namespace: "{{ namespace }}"
+        name: "{{ item.metadata.name }}"
+      loop: "{{ pods.resources }}"
+      when: pods.resources | length > 0
+
+    # ─────────────────────────────────────────────────────────────────────────────
+    - name: Delete all Deployments in {{ namespace }}
+      kubernetes.core.k8s_info:
+        kind: Deployment
+        namespace: "{{ namespace }}"
+      register: deployments
 
     - name: Delete Deployments
       kubernetes.core.k8s:
         state: absent
         kind: Deployment
-        namespace: default
+        namespace: "{{ namespace }}"
+        name: "{{ item.metadata.name }}"
+      loop: "{{ deployments.resources }}"
+      when: deployments.resources | length > 0
+
+    # ─────────────────────────────────────────────────────────────────────────────
+    - name: Delete all Services in {{ namespace }}
+      kubernetes.core.k8s_info:
+        kind: Service
+        namespace: "{{ namespace }}"
+      register: services
 
     - name: Delete Services
       kubernetes.core.k8s:
         state: absent
         kind: Service
-        namespace: default
+        namespace: "{{ namespace }}"
+        name: "{{ item.metadata.name }}"
+      loop: "{{ services.resources }}"
+      when: services.resources | length > 0
 
-    - name: Delete PVCs
+    # ─────────────────────────────────────────────────────────────────────────────
+    - name: Delete all PersistentVolumeClaims in {{ namespace }}
+      kubernetes.core.k8s_info:
+        kind: PersistentVolumeClaim
+        namespace: "{{ namespace }}"
+      register: pvcs
+
+    - name: Delete PersistentVolumeClaims
       kubernetes.core.k8s:
         state: absent
         kind: PersistentVolumeClaim
-        namespace: default
+        namespace: "{{ namespace }}"
+        name: "{{ item.metadata.name }}"
+      loop: "{{ pvcs.resources }}"
+      when: pvcs.resources | length > 0
 
-    - name: Delete ELK resources
+    - name: Wait until no PVCs remain in {{ namespace }}
+      kubernetes.core.k8s_info:
+        kind: PersistentVolumeClaim
+        namespace: "{{ namespace }}"
+      register: pvcs_after_delete
+      until: pvcs_after_delete.resources | length == 0
+      retries: 20
+      delay: 3
+
+    # ─────────────────────────────────────────────────────────────────────────────
+    - name: Delete all PersistentVolumes matching {{ pv_filter }}
+      kubernetes.core.k8s_info:
+        kind: PersistentVolume
+      register: all_pvs
+
+    - name: Filter PVs that match name pattern {{ pv_filter }}
+      set_fact:
+        pvs_to_delete: >-
+          {{ all_pvs.resources
+             | map(attribute='metadata.name')
+             | select('match', pv_filter)
+             | list }}
+
+    - name: Delete PersistentVolumes
+      kubernetes.core.k8s:
+        state: absent
+        kind: PersistentVolume
+        name: "{{ item }}"
+      loop: "{{ pvs_to_delete }}"
+      when: pvs_to_delete | length > 0
+
+    - name: Wait until no PVs remain matching {{ pv_filter }}
+      kubernetes.core.k8s_info:
+        kind: PersistentVolume
+      register: all_pvs_after_delete
+      until: >-
+        (all_pvs_after_delete.resources
+         | map(attribute='metadata.name')
+         | select('match', pv_filter)
+         | list) | length == 0
+      retries: 20
+      delay: 3
+
+    # ─────────────────────────────────────────────────────────────────────────────
+    - name: Delete all ELK Deployments
+      kubernetes.core.k8s_info:
+        kind: Deployment
+        namespace: elk
+      register: elk_deployments
+
+    - name: Delete ELK Deployments
       kubernetes.core.k8s:
         state: absent
         kind: Deployment
         namespace: elk
+        name: "{{ item.metadata.name }}"
+      loop: "{{ elk_deployments.resources }}"
+      when: elk_deployments.resources | length > 0

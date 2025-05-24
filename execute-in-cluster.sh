@@ -83,3 +83,41 @@ echo "    e.g. http://$MINIKUBE_IP.nip.io"
 
 echo
 echo "🎉 Done! If things didn’t come up, inspect logs with 'kubectl describe' or 'kubectl logs'."
+
+
+minikube kubectl -- config view --raw > minikube-kubeconfig.yaml
+
+export KUBECONFIG=/home/deepanshu/Documents/SPE_Major/NST_app/persistent_storage/minikube-kubeconfig.yaml
+
+
+
+
+
+sudo snap install helm --classic
+
+
+export KUBECONFIG=/home/deepanshu/Documents/SPE_Major/NST_app/persistent_storage/minikube-kubeconfig.yaml
+
+helm repo add hashicorp https://helm.releases.hashicorp.com
+helm repo update
+
+
+
+kubectl create namespace vault
+
+helm install vault hashicorp/vault \
+  --namespace vault \
+  --set "server.dev.enabled=true" \
+  --set "server.dev.rootToken=root" \
+  --set "injector.enabled=false"    # you probably don’t need the Vault injector in dev
+
+
+kubectl -n vault get pods
+# You should see a pod like vault-0 in the Running state.
+
+
+kubectl -n vault port-forward svc/vault 8200:8200 &   # background this
+export VAULT_ADDR="http://127.0.0.1:8200"
+export VAULT_TOKEN="root"
+vault status   # should show “Initialized: true, Sealed: false”
+
