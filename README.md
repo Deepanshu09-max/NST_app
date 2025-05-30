@@ -1,6 +1,5 @@
 # Title: Neural Style Transfer Web Application: DevOps-Driven MLOps Platform
 
-
 ### Authors
 
 - **Deepanshu Saini MT2024039**
@@ -8,20 +7,17 @@
 
 ---
 
-
 ### Quick links
+
 - [Gihtub- Neural Style Transfer Application](https://github.com/Deepanshu09-max/NST_app/tree/devops)
 
 ---
 
-
 ## **Project Requirements**
+
 ![Project Requirements](report/images/ps.png)
 
-More details about the problem statement can be found in [this](./Mini%20Project_Scientific%20Calculator.pdf) document.
-
 ---
-
 
 # Understanding the NST Workflow
 
@@ -34,77 +30,74 @@ This project delivers a **production‑grade, end‑to‑end MLOps platform** fo
 - **Version Control:**  
   All code, Kubernetes manifests, and Ansible playbooks live in Git/GitHub, ensuring traceability and pull‑request–driven reviews.
 
-- **CI/CD Automation (Jenkins):**  
-  - **Lint & Test:** Python linters , JavaScript linters, `pytest` for unit tests, and `yamllint` for manifest validation.  
-  - **Docker Image Build & Push:** Each microservice (frontend, routing, inference‑model1…4, fine‑tuner) is built as a separate Docker image and pushed to Docker Hub under `deepanshu0903/nst_app:<service-tag>`.  
+- **CI/CD Automation (Jenkins):**
+
+  - **Lint & Test:** Python linters , JavaScript linters, `pytest` for unit tests, and `yamllint` for manifest validation.
+  - **Docker Image Build & Push:** Each microservice (frontend, routing, inference‑model1…4, fine‑tuner) is built as a separate Docker image and pushed to Docker Hub under `deepanshu0903/nst_app:<service-tag>`.
   - **Deploy:** A multi‑stage pipeline applies Kubernetes manifests via `kubectl` and invokes Ansible for production rollouts with zero‑downtime.
 
 - **Containerization:**  
   Services are encapsulated in Docker containers, guaranteeing consistency across development, staging, and production.
 
-- **Configuration Management (Ansible):**  
-  - Single environment inventory targeting the local Minikube cluster.  
-  - Playbooks to deploy K8s resources `deploy-k8s.yml`, ELK stack `deploy-elk.yml`, and cleanup.  
+- **Configuration Management (Ansible):**
+
+  - Single environment inventory targeting the local Minikube cluster.
+  - Playbooks to deploy K8s resources `deploy-k8s.yml`, ELK stack `deploy-elk.yml`, and cleanup.
   - Centralized variables in group_vars/all.yml for Docker registry, image namespace, and manifest paths.
 
-- **Orchestration & Scaling (Kubernetes):**  
-  - **Deployments & Services:** Each microservice has its own Deployment and ClusterIP Service under `kubernetes/deployments/` and `kubernetes/services/`.  
-  - **Persistent Volumes (PV/PVC):** Shared `persistent_storage` for model weights, input/output images, and feedback logs.  
-  - **Ingress Controller:** NGINX Ingress routes `/` and `/static` to the frontend, and `/stylize` & `/feedback` to the routing API.  
+- **Orchestration & Scaling (Kubernetes):**
+
+  - **Deployments & Services:** Each microservice has its own Deployment and ClusterIP Service under `kubernetes/deployments/` and `kubernetes/services/`.
+  - **Persistent Volumes (PV/PVC):** Shared `persistent_storage` for model weights, input/output images, and feedback logs.
+  - **Ingress Controller:** NGINX Ingress routes `/` and `/static` to the frontend, and `/stylize` & `/feedback` to the routing API.
   - **Horizontal Pod Autoscaler (HPA):** Configurable on inference‑model Deployments to maintain target CPU utilization , enabling dynamic scaling under load.
 
-- **Monitoring & Logging (ELK):**  
-  - **Elasticsearch:** Stateful single‑node cluster stores all logs under daily indices .  
-  - **Logstash:** Beats input on port 5044, pipelines logs into Elasticsearch.  
-  - **Kibana:** Dashboard for real‑time exploration of logs from routing, inference, and fine‑tuning services.  
+- **Monitoring & Logging (ELK):**
+  - **Elasticsearch:** Stateful single‑node cluster stores all logs under daily indices .
+  - **Logstash:** Beats input on port 5044, pipelines logs into Elasticsearch.
+  - **Kibana:** Dashboard for real‑time exploration of logs from routing, inference, and fine‑tuning services.
   - **Filebeat DaemonSet:** Collects logs from every node, adds Kubernetes metadata, and ships to Logstash.
 
 ---
 
 ### Application Architecture
 
-1. **Frontend** 
-   - **Nginx** serves `index.html`, CSS, and `script.js`.  
+1. **Frontend**
+
+   - **Nginx** serves `index.html`, CSS, and `script.js`.
    - AJAX posts to `/stylize` and `/feedback`, displays images and feedback status.
 
-2. **Routing Service** 
-   - FastAPI gateway exposes  stylize  and feedback (JSON).  
-   - Reads `persistent_storage/models/{model}/latest.txt` to find the current checkpoint.  
-   - Forwards image + model path to the correct inference-service (`http://inference-service-model2:8000/infer`).  
+2. **Routing Service**
+
+   - FastAPI gateway exposes stylize and feedback (JSON).
+   - Reads `persistent_storage/models/{model}/latest.txt` to find the current checkpoint.
+   - Forwards image + model path to the correct inference-service (`http://inference-service-model2:8000/infer`).
    - Saves stylized output under `persistent_storage/output_images/` and returns base64 JSON payload.
 
-3. **Inference Services** 
-   - Each model has its own FastAPI app and `modelX_inference.py`.  
-   - Loads TensorFlow checkpoint from mounted `/persistent_storage/models/modelX`.  
+3. **Inference Services**
+
+   - Each model has its own FastAPI app and `modelX_inference.py`.
+   - Loads TensorFlow checkpoint from mounted `/persistent_storage/models/modelX`.
    - Writes temporary files to tmp, encodes output, and cleans up.
 
-4. **Fine‑Tuning Service**  
-   - Listens on triggered via Jenkins Job to retrain models using accumulated feedback in `feedback.jsonl`.  
+4. **Fine‑Tuning Service**
+   - Listens on triggered via Jenkins Job to retrain models using accumulated feedback in `feedback.jsonl`.
    - Outputs new checkpoints into `persistent_storage/models/modelX/`, updates `latest.txt`, and triggers a rebuild/deploy.
 
 ---
 
 ### Automated DevOps Workflow
 
-1. **Developer Pushes Code → GitHub**  
-2. **Jenkins CI**  
-   - Validates code, builds Docker images, pushes to Docker Hub.  
-3. **Jenkins CD**  
-   - Applies K8s manifests via `kubectl apply -f kubernetes/...`.  
-   - Runs Ansible playbook for production (if flagged).  
-4. **Kubernetes Rolling Updates**  
-   - New Pods start before old ones terminate—users experience zero downtime.  
-5. **ELK & Monitoring**  
-   - Logs are collected by Filebeat → shipped to Logstash → indexed in Elasticsearch → visualized in Kibana.  
-
----
-
-### Security & Advanced Features
-
-- **Secure Credentials:** Vault or Kubernetes Secrets can store DockerHub credentials, Kubeconfig files, and any API tokens.  
-- **Modular Ansible:** Playbooks organized by function (`deploy-k8s`, `deploy-elk`, `cleanup`), with shared variables under `group_vars`.  
-- **HPA:** Each inference Deployment can scale between 1–5 replicas based on CPU usage.  
-- **Live Patching:** Rolling updates ensure that new code or config changes do not interrupt in‑flight requests.
+1. **Developer Pushes Code → GitHub**
+2. **Jenkins CI**
+   - Validates code, builds Docker images, pushes to Docker Hub.
+3. **Jenkins CD**
+   - Applies K8s manifests via `kubectl apply -f kubernetes/...`.
+   - Runs Ansible playbook for production (if flagged).
+4. **Kubernetes Rolling Updates**
+   - New Pods start before old ones terminate—users experience zero downtime.
+5. **ELK & Monitoring**
+   - Logs are collected by Filebeat → indexed in Elasticsearch → visualized in Kibana.
 
 ---
 
@@ -120,60 +113,44 @@ This project delivers a **production‑grade, end‑to‑end MLOps platform** fo
 
 ### Getting Started
 
-- **Local Development**  
+- **Local Development**
   ```bash
   # Build & run all services locally
   docker-compose up --build
   # Open http://localhost:8080
+  ```
+
 ---
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#  Neural Style Transfer Web Application
+# Neural Style Transfer Web Application
 
 ## 1. Application Overview
 
 The **Neural Style Transfer (NST) platform** is a fully end‑to‑end system that lets users upload their own photographs and apply one of several deep learning style models—ranging from classical “Udnie” or “Rain Princess” to custom user‑supplied styles. Built for **scalability**, **modularity**, and **continuous delivery**, the platform collects real user feedback to trigger automated model fine‑tuning, ensuring that every iteration of the service delivers richer, more pleasing stylizations.
 
 - **Instant Stylization**  
-  Users upload an image via a modern single‑page frontend. A simple dropdown lets them choose among four pre‑trained style models. In under two seconds*, the routed FastAPI “Routing Service” proxies the request to the correct inference container, which applies the chosen style and returns a Base64‑encoded PNG.  
+  Users upload an image via a modern single‑page frontend. A simple dropdown lets them choose among four pre‑trained style models. In under two seconds\*, the routed FastAPI “Routing Service” proxies the request to the correct inference container, which applies the chosen style and returns a Base64‑encoded PNG.
 - **Seamless Download & Feedback**  
-  Once the stylized image is rendered, users can download it and submit feedback (“good” or “bad”) via the same interface. Feedback is appended to a JSONL file in our shared `persistent_storage` volume.  
+  Once the stylized image is rendered, users can download it and submit feedback (“good” or “bad”) via the same interface. Feedback is appended to a JSONL file in our shared `persistent_storage` volume.
 - **CI/CD & Monitoring**  
-  A Jenkins‑driven pipeline builds and pushes Docker images for each microservice (frontend, routing, inference‑models, fine‑tuner), applies Kubernetes manifests, and spins up the entire stack—including ELK logging and Prometheus/Grafana monitoring. Horizontal Pod Autoscalers (HPA) ensure services can scale under load, and live‐patching via rolling updates guarantees zero‑downtime deployments.  
+  A Jenkins‑driven pipeline builds and pushes Docker images for each microservice (frontend, routing, inference‑models, fine‑tuner), applies Kubernetes manifests, and spins up the entire stack—including ELK logging.
 - **Continuous Improvement**  
   When the ratio of “bad” feedback crosses a configurable threshold, a separate Jenkins job invokes the fine‑tuning service in an isolated container. The newly trained weights are persisted back into `persistent_storage/models`, a new Docker image is built, and the main pipeline is automatically retriggered to redeploy with the updated style model.
 
 ---
 
-###  System Architecture
+### System Architecture
 
-#### 1. Frontend 
+#### 1. Frontend
 
+**Live Image Preview and Feedback Integration**
+![Alt text describing the image](report/images/f-index.png)
 
-  **Live Image Preview and Feedback Integration**
-  ![Alt text describing the image](report/images/f-index.png)
-
-- **UI:** 
+- **UI:**
   - Modern, responsive HTML5 interface.
   - Model selector, image upload, live preview, stylized result, and feedback form.
     **Screenshot: NST Web Application Frontend**
-- **Styling:** 
+- **Styling:**
   - Clean, mobile-friendly design with subtle shadows, rounded corners, and intuitive layout.
 - **Client-side Logic:**
 
@@ -200,10 +177,7 @@ The **Neural Style Transfer (NST) platform** is a fully end‑to‑end system th
 - **Web Server:** [`frontend/nginx.conf`](frontend/nginx.conf)
   - Nginx serves static assets, handles routing, and can be extended for caching and compression.
 
-
-
-
-####  Routing Service 
+#### Routing Service
 
 - **API Gateway:**
 
@@ -230,7 +204,7 @@ The **Neural Style Transfer (NST) platform** is a fully end‑to‑end system th
   - Dynamically discovers the latest model checkpoint for each style model.
   - Forwards requests to the correct inference service using Kubernetes service DNS.
 
-####  Inference Microservices 
+#### Inference Microservices
 
 - **Each Model (1–4):**
 
@@ -268,14 +242,14 @@ The **Neural Style Transfer (NST) platform** is a fully end‑to‑end system th
 
   **Stylized outputs by the models**
 
-  | Model   | Style Image            | Output Image         |
-  | ------- | ---------------------- | -------------------- |
+  | Model   | Style Image                   | Output Image                |
+  | ------- | ----------------------------- | --------------------------- |
   | Model 1 | ![](report/images/style1.jpg) | ![](report/images/op1.jpeg) |
   | Model 2 | ![](report/images/style2.jpg) | ![](report/images/op2.jpeg) |
   | Model 3 | ![](report/images/style3.jpg) | ![](report/images/op3.jpeg) |
   | Model 4 | ![](report/images/style4.jpg) | ![](report/images/op4.jpeg) |
 
-####  Fine-Tuning Service 
+#### Fine-Tuning Service
 
 - **Feedback Loop:**
 
@@ -316,7 +290,6 @@ The **Neural Style Transfer (NST) platform** is a fully end‑to‑end system th
 
 ---
 
-
 ## 2. DevOps & CI/CD
 
 ### Docker
@@ -331,9 +304,10 @@ The **Neural Style Transfer (NST) platform** is a fully end‑to‑end system th
     - A predefined entrypoint (`uvicorn main:app …` for FastAPI, `nginx -g daemon off;` for the frontend)
   - Once built, the same container image runs identically on your laptop, in Minikube, or in a cloud Kubernetes cluster—eliminating “works on my machine” issues.
 
-- **Base ML Image:** 
-  - **Purpose:** Share a common foundation across all NST inference and fine‑tuning services.  
-  - **Contents:**  
+- **Base ML Image:**
+
+  - **Purpose:** Share a common foundation across all NST inference and fine‑tuning services.
+  - **Contents:**
     ```dockerfile
     FROM python:3.9-slim-buster
     WORKDIR /app
@@ -344,17 +318,19 @@ The **Neural Style Transfer (NST) platform** is a fully end‑to‑end system th
     In each `inference_services/model*/Dockerfile` and `fine_tuning_service/Dockerfile`, we start FROM `docker.io/deepanshu0903/nst_app:base-ml` to avoid reinstalling large ML frameworks repeatedly.
 
 - **Service‑Specific Dockerfiles:**
-  - **Inference Services** 
-    - `FROM deepanshu0903/nst_app:base-ml` : 
+
+  - **Inference Services**
+    - `FROM deepanshu0903/nst_app:base-ml` :
     - Copy FastAPI app code into `/app`, install model‑specific dependencies via `requirements.txt`, expose port `8000`, and launch with `uvicorn main:app --host 0.0.0.0 --port 8000`.
-  - **Fine‑Tuning Service** 
+  - **Fine‑Tuning Service**
     - Builds on the same ML base image, includes TensorFlow training scripts (`training_utils.py`), exposes port `8001` (for manual training triggers), and runs via `uvicorn`.
-  - **Routing Service** 
+  - **Routing Service**
     - Built FROM Python 3.9-slim, installs `requests`, `fastapi`, writes logs to `/var/log/app/app.log`, exposes port `8000`.
-  - **Frontend**  
+  - **Frontend**
     - `FROM nginx:alpine`, copies `index.html`, `static/` and `nginx.conf` into `/usr/share/nginx/html` and `/etc/nginx/nginx.conf`, respectively.
 
 - **Docker Compose for Local Development:** `docker-compose.yml`
+
   - **Services Defined:**
     - `frontend` on port `8080`
     - `routing-service` (FastAPI) on port `8000`
@@ -380,73 +356,73 @@ The **Neural Style Transfer (NST) platform** is a fully end‑to‑end system th
 
 These Docker and CI/CD specifics ensure that every change to our codebase—be it a new style model, a Frontend tweak, or an updated training script—flows automatically through testing, containerization, and deployment, culminating in a production‑ready update within minutes.
 
+**Multi-Service Docker Compose for Local ML Development**
+![Alt text describing the image](images/i7.png)
 
-  **Multi-Service Docker Compose for Local ML Development**
-  ![Alt text describing the image](images/i7.png)
+**Running the Services via Docker Compose (Step-by-Step)**
 
-  **Running the Services via Docker Compose (Step-by-Step)**
+1.  **Install Docker and Docker Compose:**
 
-  1.  **Install Docker and Docker Compose:**
+    - Think of Docker as the engine that runs your application packages (containers). Docker Compose is a tool that lets you define and manage multiple containers as a single application.
+    - **On macOS:** Download Docker Desktop from the official Docker website and follow the installation instructions. Docker Compose is included.
+    - **On Windows:** Download Docker Desktop from the official Docker website and follow the installation instructions. Docker Compose is included. Ensure that you enable WSL 2 during installation if prompted.
+    - **On Linux:** Follow the instructions on the Docker website for your specific distribution to install Docker Engine and Docker Compose separately.
 
-      - Think of Docker as the engine that runs your application packages (containers). Docker Compose is a tool that lets you define and manage multiple containers as a single application.
-      - **On macOS:** Download Docker Desktop from the official Docker website and follow the installation instructions. Docker Compose is included.
-      - **On Windows:** Download Docker Desktop from the official Docker website and follow the installation instructions. Docker Compose is included. Ensure that you enable WSL 2 during installation if prompted.
-      - **On Linux:** Follow the instructions on the Docker website for your specific distribution to install Docker Engine and Docker Compose separately.
+2.  **Navigate to the Project Root:**
 
-  2.  **Navigate to the Project Root:**
+    - Open a terminal (command prompt or PowerShell on Windows) and use the `cd` command to navigate to the root directory of the NST project. This is the folder that contains the `docker-compose.yml` file.
+    - Example: `cd /Users/aryanrastogi/college/spe/NST_Major/neural-style-transfer`
 
-      - Open a terminal (command prompt or PowerShell on Windows) and use the `cd` command to navigate to the root directory of the NST project. This is the folder that contains the `docker-compose.yml` file.
-      - Example: `cd /Users/aryanrastogi/college/spe/NST_Major/neural-style-transfer`
+3.  **Start the Services:**
 
-  3.  **Start the Services:**
+    - Run the following command to start all the services defined in `docker-compose.yml`:
 
-      - Run the following command to start all the services defined in `docker-compose.yml`:
+      ```bash
+      docker-compose up --build
+      ```
 
-        ```bash
-        docker-compose up --build
-        ```
+      - `docker-compose up`: This command tells Docker Compose to start the services defined in the `docker-compose.yml` file.
+      - `--build`: This flag tells Docker Compose to build the Docker images for any services that have a `build` section in the `docker-compose.yml` file. This is necessary the first time you run the application or when you make changes to the Dockerfiles.
 
-        - `docker-compose up`: This command tells Docker Compose to start the services defined in the `docker-compose.yml` file.
-        - `--build`: This flag tells Docker Compose to build the Docker images for any services that have a `build` section in the `docker-compose.yml` file. This is necessary the first time you run the application or when you make changes to the Dockerfiles.
+4.  **Monitor the Startup:**
 
-  4.  **Monitor the Startup:**
+    - Observe the terminal output to monitor the startup process of each service. Docker Compose will display logs from each container as they start.
+    - Wait until you see messages indicating that each service has started successfully (e.g., "Uvicorn running on ...").
 
-      - Observe the terminal output to monitor the startup process of each service. Docker Compose will display logs from each container as they start.
-      - Wait until you see messages indicating that each service has started successfully (e.g., "Uvicorn running on ...").
+5.  **Access the Application:**
 
-  5.  **Access the Application:**
+    - Once all services are running, access the application by opening your web browser and navigating to `http://localhost:8080`. This will direct you to the frontend service.
+    - `localhost` refers to your own computer. `8080` is the port number that the frontend service is configured to listen on (as defined in `docker-compose.yml`).
 
-      - Once all services are running, access the application by opening your web browser and navigating to `http://localhost:8080`. This will direct you to the frontend service.
-      - `localhost` refers to your own computer. `8080` is the port number that the frontend service is configured to listen on (as defined in `docker-compose.yml`).
+6.  **Access the Services Directly (for Debugging):**
 
-  6.  **Access the Services Directly (for Debugging):**
+    - You can access individual services directly for debugging or testing purposes:
 
-      - You can access individual services directly for debugging or testing purposes:
+      - Frontend: `http://localhost:8080`
+      - Routing Service: `http://localhost:8000`
+      - Inference Model 1: `http://localhost:8001`
+      - Inference Model 2: `http://localhost:8002`
+      - Inference Model 3: `http://localhost:8003`
+      - Inference Model 4: `http://localhost:8004`
+      - Fine-Tuning Service: `http://localhost:8005`
 
-        - Frontend: `http://localhost:8080`
-        - Routing Service: `http://localhost:8000`
-        - Inference Model 1: `http://localhost:8001`
-        - Inference Model 2: `http://localhost:8002`
-        - Inference Model 3: `http://localhost:8003`
-        - Inference Model 4: `http://localhost:8004`
-        - Fine-Tuning Service: `http://localhost:8005`
+7.  **Stop the Services:**
 
-  7.  **Stop the Services:**
+    - To stop the services, run the following command in the same terminal:
 
-      - To stop the services, run the following command in the same terminal:
+      ```bash
+      docker-compose down
+      ```
 
-        ```bash
-        docker-compose down
-        ```
+      - This command will stop and remove the containers, networks, and volumes created by `docker-compose up`.
+      - It's a clean way to shut down the application and free up resources.
 
-        - This command will stop and remove the containers, networks, and volumes created by `docker-compose up`.
-        - It's a clean way to shut down the application and free up resources.
-
-###  **Kubernetes**
+### **Kubernetes**
 
 - **General Concept: Container Orchestration with Kubernetes**
 
 - Kubernetes (often shortened to K8s) is like a conductor for an orchestra of containers. It automates the deployment, scaling, and management of your containerized applications. Think of it as a platform that makes sure your application is always running as you intended, even if individual containers fail or need to be scaled up to handle more traffic. Kubernetes handles tasks like:
+
   - **Scheduling:** Deciding where to run your containers.
   - **Scaling:** Automatically increasing or decreasing the number of containers based on demand.
   - **Self-healing:** Restarting failed containers and replacing them automatically.
@@ -480,7 +456,6 @@ These Docker and CI/CD specifics ensure that every change to our codebase—be i
 - **Monitoring & Logging:**
 
 - **ELK:** [`kubernetes/elk/`](kubernetes/elk/): Elasticsearch, Logstash, Kibana, Filebeat manifests for centralized logging.
-- **Prometheus/Grafana:** [`kubernetes/monitoring/`](kubernetes/monitoring/): Placeholders for metrics stack and dashboards.
 
 **Innovative Snippet: Persistent Volume Claim for Model and Data Sharing**
 ![Alt text describing the image](report/images/i8.png)
@@ -489,78 +464,78 @@ These Docker and CI/CD specifics ensure that every change to our codebase—be i
 
 1.  **Install kubectl:**
 
-  - `kubectl` is the command-line tool for interacting with your Kubernetes cluster.
-  - **On macOS:** `brew install kubectl` (if you have Homebrew installed)
-  - **On Windows:** Download the `kubectl` binary from the Kubernetes website and add it to your PATH.
-  - **On Linux:** Follow the instructions on the Kubernetes website for your specific distribution.
+- `kubectl` is the command-line tool for interacting with your Kubernetes cluster.
+- **On macOS:** `brew install kubectl` (if you have Homebrew installed)
+- **On Windows:** Download the `kubectl` binary from the Kubernetes website and add it to your PATH.
+- **On Linux:** Follow the instructions on the Kubernetes website for your specific distribution.
 
 2.  **Configure kubectl:**
 
-  - `kubectl` needs to be configured to connect to your Kubernetes cluster. This typically involves setting the `KUBECONFIG` environment variable or placing a configuration file in `~/.kube/config`.
-  - The specific configuration steps depend on your Kubernetes provider (e.g., Minikube, Google Kubernetes Engine, Amazon EKS, Azure Kubernetes Service). Follow the instructions provided by your provider.
+- `kubectl` needs to be configured to connect to your Kubernetes cluster. This typically involves setting the `KUBECONFIG` environment variable or placing a configuration file in `~/.kube/config`.
+- The specific configuration steps depend on your Kubernetes provider (e.g., Minikube, Google Kubernetes Engine, Amazon EKS, Azure Kubernetes Service). Follow the instructions provided by your provider.
 
 3.  **Install Ansible:**
 
-  - Ansible is an automation tool that we'll use to deploy the application to Kubernetes.
-  - **On macOS:** `brew install ansible` (if you have Homebrew installed)
-  - **On Windows:** Install Python and pip, then run `pip install ansible`.
-  - **On Linux:** Use your distribution's package manager (e.g., `apt install ansible` on Debian/Ubuntu).
+- Ansible is an automation tool that we'll use to deploy the application to Kubernetes.
+- **On macOS:** `brew install ansible` (if you have Homebrew installed)
+- **On Windows:** Install Python and pip, then run `pip install ansible`.
+- **On Linux:** Use your distribution's package manager (e.g., `apt install ansible` on Debian/Ubuntu).
 
 4.  **Configure Ansible:**
 
-  - Ansible needs to be configured to connect to your Kubernetes cluster. This typically involves setting up SSH access to a node in the cluster or using a Kubernetes API token.
-  - The specific configuration steps depend on your Kubernetes provider.
+- Ansible needs to be configured to connect to your Kubernetes cluster. This typically involves setting up SSH access to a node in the cluster or using a Kubernetes API token.
+- The specific configuration steps depend on your Kubernetes provider.
 
 5.  **Navigate to the Ansible Playbooks Directory:**
 
-  - Open a terminal and navigate to the `ansible/playbooks` directory in the NST project.
+- Open a terminal and navigate to the `ansible/playbooks` directory in the NST project.
 
 6.  **Run the Umbrella Playbook:**
 
-  - Execute the `umbrella-playbook.yml` playbook to deploy the entire application stack:
+- Execute the `umbrella-playbook.yml` playbook to deploy the entire application stack:
 
-    ```bash
-    ansible-playbook umbrella-playbook.yml -i inventory.ini
-    ```
+  ```bash
+  ansible-playbook umbrella-playbook.yml -i inventory.ini
+  ```
 
-    - `ansible-playbook`: This command tells Ansible to run the specified playbook.
-    - `umbrella-playbook.yml`: This is the main playbook that orchestrates the deployment of the application.
-    - `-i inventory.ini`: This flag specifies the inventory file, which contains information about the target Kubernetes cluster. You may need to create or modify this file based on your cluster setup.
+  - `ansible-playbook`: This command tells Ansible to run the specified playbook.
+  - `umbrella-playbook.yml`: This is the main playbook that orchestrates the deployment of the application.
+  - `-i inventory.ini`: This flag specifies the inventory file, which contains information about the target Kubernetes cluster. You may need to create or modify this file based on your cluster setup.
 
 7.  **Monitor the Deployment:**
 
-  - Observe the terminal output to monitor the deployment process. Ansible will display the status of each task as it executes.
-  - Pay attention to any errors or warnings that may occur.
+- Observe the terminal output to monitor the deployment process. Ansible will display the status of each task as it executes.
+- Pay attention to any errors or warnings that may occur.
 
 8.  **Verify the Deployment:**
 
-  - Once the playbook has completed, verify that all the services are running correctly by checking the status of the deployments and pods:
-    ![Alt text describing the image](report/images/i9.png)
+- Once the playbook has completed, verify that all the services are running correctly by checking the status of the deployments and pods:
+  ![Alt text describing the image](report/images/i9.png)
 
-    - `kubectl get deployments`: This command lists all the deployments in the Kubernetes cluster.
-    - `kubectl get pods`: This command lists all the pods in the Kubernetes cluster.
-    - Ensure that all deployments have the desired number of replicas and that all pods are in the `Running` state.
+  - `kubectl get deployments`: This command lists all the deployments in the Kubernetes cluster.
+  - `kubectl get pods`: This command lists all the pods in the Kubernetes cluster.
+  - Ensure that all deployments have the desired number of replicas and that all pods are in the `Running` state.
 
 9.  **Access the Application:**
 
-  - To access the application, you need to determine the external IP address or hostname of the Ingress controller. The exact steps depend on your Kubernetes provider.
-  - **Minikube:** `minikube service list`
-  - **Cloud Providers (GKE, EKS, AKS):** Check the Ingress resource in your cloud provider's console or use `kubectl get ingress`.
-  - Once you have the external IP address or hostname, open it in your web browser to access the application.
+- To access the application, you need to determine the external IP address or hostname of the Ingress controller. The exact steps depend on your Kubernetes provider.
+- **Minikube:** `minikube service list`
+- **Cloud Providers (GKE, EKS, AKS):** Check the Ingress resource in your cloud provider's console or use `kubectl get ingress`.
+- Once you have the external IP address or hostname, open it in your web browser to access the application.
 
 10. **Access Kibana:**
 
-  - Similarly, determine the external IP address or hostname of the Kibana service and access the Kibana dashboard in your web browser.
+- Similarly, determine the external IP address or hostname of the Kibana service and access the Kibana dashboard in your web browser.
 
-###  **ELK Stack Logging**
+### **ELK Stack Logging**
 
 To achieve centralized, real‑time log collection and inspection across all NST microservices, we have integrated the ELK stack (Elasticsearch, Logstash, Kibana) with Filebeat as a DaemonSet. Here’s how it all fits together:
 
 ### 1. Filebeat (Log Shipper)
 
-- **DaemonSet Deployment** 
-  - Runs one Filebeat pod on each Kubernetes node.  
-  - **Autodiscover** mode watches `/var/log/containers/*.log` on the host and uses Kubernetes metadata to annotate each log entry with `pod`, `namespace`, `container`, and `labels`.  
+- **DaemonSet Deployment**
+  - Runs one Filebeat pod on each Kubernetes node.
+  - **Autodiscover** mode watches `/var/log/containers/*.log` on the host and uses Kubernetes metadata to annotate each log entry with `pod`, `namespace`, `container`, and `labels`.
   - **ConfigMap** supplies:
     ```yaml
     filebeat.autodiscover:
@@ -577,8 +552,8 @@ To achieve centralized, real‑time log collection and inspection across all NST
 
 ### 2. Logstash (Log Parser & Router)
 
-- **Deployment** (`kubernetes/elk/logstash-deployment.yaml`)  
-  - Exposes port **5044** to receive beats.  
+- **Deployment** (`kubernetes/elk/logstash-deployment.yaml`)
+  - Exposes port **5044** to receive beats.
   - **Pipeline Config** is provided via a ConfigMap (`logstash-pipeline`):
     ```conf
     input { beats { port => 5044 } }
@@ -596,16 +571,16 @@ To achieve centralized, real‑time log collection and inspection across all NST
 
 ### 3. Elasticsearch (Log Storage & Search)
 
-- **Single‑Node Deployment** 
-  - Runs a single replica with `discovery.type=single-node` for simplicity.  
-  - Stores and indexes incoming JSON log documents under daily indices (`nst-logs-2025.05.19`, etc.).  
+- **Single‑Node Deployment**
+  - Runs a single replica with `discovery.type=single-node` for simplicity.
+  - Stores and indexes incoming JSON log documents under daily indices (`nst-logs-2025.05.19`, etc.).
   - **Service** (`elasticsearch-service.yaml`) exposes port **9200** within the cluster.
 
 ### 4. Kibana (Log Visualization)
 
-- **Deployment** 
-  - Connects to the Elasticsearch service at `elasticsearch:9200`.  
-  - **Service** (`kibana-service.yaml`) exposes port **5601**.  
+- **Deployment**
+  - Connects to the Elasticsearch service at `elasticsearch:9200`.
+  - **Service** (`kibana-service.yaml`) exposes port **5601**.
   - Developers can port‑forward:
     ```bash
     kubectl port-forward svc/kibana 5601:5601 -n elk
@@ -619,12 +594,10 @@ To achieve centralized, real‑time log collection and inspection across all NST
 
 ### How It Works End‑to‑End
 
-1. **Application Pods** (routing, inference, fine‑tuner) write structured logs to **stdout** or to a file under `/var/log/app/app.log`.  
-2. **Filebeat** DaemonSet on each node automatically picks up all container logs, enriches them with Kubernetes metadata, and forwards them to Logstash.  
-3. **Logstash** applies any parsing, filtering, or enrichment (e.g., dropping health-check noise), then indexes the logs into Elasticsearch.  
+1. **Application Pods** (routing, inference, fine‑tuner) write structured logs to **stdout** or to a file under `/var/log/app/app.log`.
+2. **Filebeat** DaemonSet on each node automatically picks up all container logs, enriches them with Kubernetes metadata, and forwards them to Logstash.
+3. **Logstash** applies any parsing, filtering, or enrichment (e.g., dropping health-check noise), then indexes the logs into Elasticsearch.
 4. **Kibana** provides a powerful UI to explore, filter, and visualize these logs in real time—allowing you to trace a user’s stylization request from front‑end upload, through routing, to inference service execution and feedback storage.
-
-
 
 ### **Ansible**
 
@@ -683,12 +656,12 @@ The main Jenkins pipeline orchestrates the entire DevOps lifecycle for the NST p
 6. **Feedback-Driven Fine-Tuning:**  
    The pipeline automatically monitors user feedback by counting the number of `"bad"` feedback entries in `feedback.jsonl`. If the count exceeds a configurable threshold (e.g., 5), it triggers the dedicated FineTuneModels pipeline to retrain the models. This closes the ML loop, ensuring that the models continuously improve based on real user input.
 
-7. **Deploy to Production (Optional):**  
+7. **Deploy to Production:**  
    For maximum safety, production deployment is gated behind a parameter. When enabled, the pipeline runs an Ansible playbook to deploy the latest images to the production environment, ensuring a controlled and auditable release process.
 
 8. **Cleanup:**  
    After every run, the pipeline prunes unused Docker images to keep the build agents clean and efficient.
-         ![Alt text describing the image](report/images/jenkins1.png)
+   ![Alt text describing the image](report/images/jenkins1.png)
 
 **Why this design?**  
 This pipeline is crafted for speed, safety, and continuous improvement. By parallelizing checks, automating deployments, and integrating feedback-driven retraining, it enables rapid iteration while maintaining high reliability. The use of secure credentials, parameterized production deploys, and automated cleanups reflects best practices in modern DevOps.
@@ -715,17 +688,15 @@ The FineTuneModels Jenkins job is a specialized, parameterized pipeline designed
      If anything goes wrong, an email notification is sent to the relevant stakeholders, including a link to the build logs for rapid troubleshooting.
    - **Always:**  
      Regardless of outcome, the pipeline logs completion, ensuring that every run is accounted for.
-           ![Alt text describing the image](report/images/jenkins2.png)
+     ![Alt text describing the image](report/images/jenkins2.png)
 
 **Why this design?**  
 This pipeline empowers both automation and developer-driven experimentation. By parameterizing every aspect of the fine-tuning process, it supports rapid iteration, reproducibility, and easy integration with the main CI/CD flow. The ability to automatically re-trigger the main pipeline ensures that improvements are quickly propagated to users, while robust notifications and logging keep the team informed.
 
 ---
 
-
 > _“Upon refreshing the application, the new changes should be visible seamlessly.”_  
 > Thanks to Kubernetes rolling‐update strategy and loosely coupled microservices, each new Docker image or updated ConfigMap deploys with zero downtime. Users never lose connectivity during a release.
-
 
 **In summary:**  
 These Jenkins pipelines embody the principles of modern MLOps: automation, feedback-driven improvement, traceability, and developer empowerment. They ensure that every code change, model update, and user feedback cycle is seamlessly integrated into a robust, production-grade workflow—delivering better models, faster, and with confidence.
@@ -743,8 +714,6 @@ These Jenkins pipelines embody the principles of modern MLOps: automation, feedb
 
 ## 4. Scalability & Resilience
 
-- **Horizontal Pod Autoscaler:**
-  - (Not present, but recommended for inference/routing services. Example: scale up when CPU > 70%.)
 - **Load Balancing:**
   - K8s Services provide internal load balancing; Ingress for external.
 - **Service Discovery:**

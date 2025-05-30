@@ -4,7 +4,38 @@
   gather_facts: no
 
   tasks:
-    - name: Apply Elasticsearch
+    # 1) Create the `elk` namespace first—nothing else can go into `elk/` until this exists.
+    - name: Ensure namespace `elk` exists
+      kubernetes.core.k8s:
+        api_version: v1
+        kind: Namespace
+        name: elk
+        state: present
+
+    # Wait for namespace `elk` to be created
+    - name: Wait for namespace `elk` to be created
+      shell: |
+        kubectl get namespace elk --no-headers || exit 1
+      register: namespace_check
+      retries: 5
+      delay: 2
+      until: namespace_check.rc == 0
+      check_mode: no  # Ensure this task runs even in --check mode
+
+    # 2) Now that `elk` definitely exists, apply every ELK manifest under namespace=elk.
+    - name: Apply Elasticsearch ConfigMap
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ elk_manifests_dir }}/elasticsearch-configmap.yaml"
+        namespace: elk
+
+    - name: Apply Elasticsearch PVC
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ elk_manifests_dir }}/elasticsearch-pvc.yaml"
+        namespace: elk
+
+    - name: Apply Elasticsearch Deployment
       kubernetes.core.k8s:
         state: present
         src: "{{ elk_manifests_dir }}/elasticsearch-deployment.yaml"
@@ -14,6 +45,18 @@
       kubernetes.core.k8s:
         state: present
         src: "{{ elk_manifests_dir }}/elasticsearch-service.yaml"
+        namespace: elk
+
+    - name: Apply Kibana Deployment
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ elk_manifests_dir }}/kibana-deployment.yaml"
+        namespace: elk
+
+    - name: Apply Kibana Service
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ elk_manifests_dir }}/kibana-service.yaml"
         namespace: elk
 
     - name: Apply Logstash ConfigMap
@@ -28,16 +71,10 @@
         src: "{{ elk_manifests_dir }}/logstash-deployment.yaml"
         namespace: elk
 
-    - name: Apply Kibana
+    - name: Apply Logstash Service
       kubernetes.core.k8s:
         state: present
-        src: "{{ elk_manifests_dir }}/kibana-deployment.yaml"
-        namespace: elk
-
-    - name: Apply Kibana Service
-      kubernetes.core.k8s:
-        state: present
-        src: "{{ elk_manifests_dir }}/kibana-service.yaml"
+        src: "{{ elk_manifests_dir }}/logstash-service.yaml"
         namespace: elk
 
     - name: Apply Filebeat RBAC
@@ -58,10 +95,21 @@
         src: "{{ elk_manifests_dir }}/filebeat-daemonset.yaml"
         namespace: elk
 
-    - name: Wait for Elasticsearch to be Running
+    # 3) Finally, wait on each component’s pods by label so you know they’re actually Ready.
+    - name: Wait for Elasticsearch pods to be Ready
       shell: |
-        kubectl wait --for=condition=Ready pod -l app=elasticsearch --namespace=elk --timeout=120s
+        kubectl wait --for=condition=Ready pod \
+          -l app=elasticsearch \
+          --namespace=elk --timeout=120s
 
-    - name: Wait for Kibana to be Running
+    - name: Wait for Kibana pods to be Ready
       shell: |
-        kubectl wait --for=condition=Ready pod -l app=kibana --namespace=elk --timeout=120s
+        kubectl wait --for=condition=Ready pod \
+          -l app=kibana \
+          --namespace=elk --timeout=120s
+
+    - name: Wait for Logstash pods to be Ready
+      shell: |
+        kubectl wait --for=condition=Ready pod \
+          -l app=logstash \
+          --namespace=elk --timeout=120s
